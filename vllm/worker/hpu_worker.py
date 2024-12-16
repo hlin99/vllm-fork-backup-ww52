@@ -3,7 +3,11 @@
 ###############################################################################
 
 import gc
+import gzip
+import json
 import os
+import queue
+import time
 from typing import List, Optional, Set, Tuple, Type
 
 import habana_frameworks.torch as htorch  # noqa:F401
@@ -22,7 +26,8 @@ from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sequence import ExecuteModelRequest
 from vllm.utils import hpu_backend_string, hpu_device_string, is_fake_hpu
 from vllm.worker.cache_engine import CacheEngine
-from vllm.worker.hpu_model_runner import HPUModelRunner
+from vllm.worker.hpu_enc_dec_model_runner import HPUEncoderDecoderModelRunner
+from vllm.worker.hpu_model_runner import HPUModelRunner, HPUModelRunnerBase
 from vllm.worker.worker_base import (LocalOrDistributedWorkerBase, WorkerBase,
                                      WorkerInput)
 
@@ -71,17 +76,20 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 not in ["medusa", "mlp_speculator", "eagle"]) \
                     else {"return_hidden_states": True}
 
-        ModelRunnerClass: Type[HPUModelRunner] = HPUModelRunner
+        is_encoder_decoder_model = self._is_encoder_decoder_model()
+        ModelRunnerClass: Type[HPUModelRunnerBase] = HPUModelRunner
         if model_runner_cls is not None:
             ModelRunnerClass = model_runner_cls
-        else:
-            ModelRunnerClass = HPUModelRunner
-        self.model_runner: HPUModelRunner = ModelRunnerClass(
+        elif is_encoder_decoder_model:
+            ModelRunnerClass = HPUEncoderDecoderModelRunner
+        self.model_runner: HPUModelRunnerBase = ModelRunnerClass(
             vllm_config=vllm_config,
             kv_cache_dtype=self.cache_config.cache_dtype,
             is_driver_worker=is_driver_worker,
             **speculative_args,
         )
+        if model_runner_cls is not None:
+            self.model_runner = model_runner_cls(self.model_runner)
         # Uninitialized cache engine. Will be initialized by
         # initialize_cache.
         self.cache_engine: List[HPUCacheEngine]
@@ -93,21 +101,85 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             torch_profiler_trace_dir = envs.VLLM_TORCH_PROFILER_DIR
             logger.info("Profiling enabled. Traces will be saved to: %s",
                         torch_profiler_trace_dir)
+
+            if os.getenv('VLLM_PROFILER_ENABLED') == 'full':
+                fn = self.full_trace_handler
+                with_stack = False
+            else:
+                fn = torch.profiler.tensorboard_trace_handler
+                with_stack = True
             self.profiler = torch.profiler.profile(
                 activities=[
                     torch.profiler.ProfilerActivity.CPU,
                     torch.profiler.ProfilerActivity.HPU,
                 ],
-                with_stack=True,
-                on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    torch_profiler_trace_dir, use_gzip=True))
+                with_stack=with_stack,
+                on_trace_ready=fn(torch_profiler_trace_dir, use_gzip=True))
         else:
             self.profiler = None
+
+    def full_trace_handler(self, dir_name, use_gzip=False):
+
+        def handler_fn(prof) -> None:
+            if not os.path.isdir(dir_name):
+                try:
+                    os.makedirs(dir_name, exist_ok=True)
+                except Exception as e:
+                    raise RuntimeError("Can't create directory: " +
+                                       dir_name) from e
+            file_name = f"vllm.{time.time_ns()}.pt.trace.json"
+            file_path = os.path.join(dir_name, file_name)
+            prof.export_chrome_trace(file_path)
+            with open(file_path) as f:
+                pytorch_trace = json.load(f)
+            os.remove(file_path)
+            base = pytorch_trace['baseTimeNanoseconds'] / 1000
+            events = self.model_runner.profiler.profiling_trace_events
+            while True:
+                try:
+                    event_str = events.get_nowait()
+                    event = json.loads(event_str[:-1])
+                    event['ts'] = event['ts'] - base
+                    pytorch_trace['traceEvents'].append(event)
+                except queue.Empty:
+                    break
+
+            pytorch_trace['traceEvents'].append({
+                "args": {
+                    "name": "vLLM"
+                },
+                "name": "process_name",
+                "ph": "M",
+                "pid": 1,
+                "tid": 0,
+                "ts": 0.0
+            })
+            if use_gzip:
+                file_path = file_path + ".gz"
+                with gzip.open(file_path, 'wt', encoding="ascii") as zipfile:
+                    json.dump(pytorch_trace, zipfile)
+            else:
+                with open(file_path, "w") as outfile:
+                    outfile.write(json.dumps(pytorch_trace))
+            logger.info("Saved full profiling to %s", file_path)
+
+        return handler_fn
+
+    def _is_encoder_decoder_model(self):
+        return self.model_config.is_encoder_decoder
 
     def start_profile(self):
         if self.profiler is None:
             raise RuntimeError("Profiler is not enabled.")
-        self.profiler.start()
+        high_level_profiler = self.model_runner.profiler
+        with high_level_profiler.record_event('internal', 'start_profiler'):
+            # Clean up the queue
+            while True:
+                try:
+                    high_level_profiler.profiling_trace_events.get_nowait()
+                except queue.Empty:
+                    break
+            self.profiler.start()
 
     def stop_profile(self):
         if self.profiler is None:
@@ -254,9 +326,6 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         # Reset the seed to ensure that the random state is not affected by
         # the model initialization and profiling.
         set_random_seed(self.model_config.seed)
-
-    def finish_measurements(self):
-        self.model_runner.finish_measurements()
 
     @property
     def do_metadata_broadcast(self) -> bool:
