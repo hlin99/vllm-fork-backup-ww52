@@ -1,0 +1,15 @@
+{
+    "method": "HOOKS",
+    "mode": "MEASURE",
+    "observer": "maxabs",
+    "whitelist": {
+        "types": [],
+        "names": []
+    },
+    "blacklist": {
+        "types": [],
+        "names": []
+    },
+    "quantize_weight": false,
+    "dump_stats_path": "quantization/Llama-2-70b-chat-hf/g2/inc_output"
+}
