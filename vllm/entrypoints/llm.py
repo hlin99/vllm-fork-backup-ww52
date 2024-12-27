@@ -1,6 +1,6 @@
 import itertools
-import warnings
 import os
+import warnings
 from contextlib import contextmanager
 from typing import (Any, ClassVar, Dict, List, Optional, Sequence, Tuple, Type,
                     Union, cast, overload)

@@ -21,6 +21,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only Qwen2 model compatible with HuggingFace weights."""
+import os
 from typing import Iterable, List, Optional, Set, Tuple, Union
 
 import torch
@@ -51,9 +52,12 @@ from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors, PoolerOutput
 
 from .interfaces import SupportsLoRA, SupportsPP
-from .utils import (AutoWeightsLoader, PPMissingLayer, is_pp_missing_parameter,
+from .utils import (AutoWeightsLoader, PPMissingLayer, get_input_mask,
+                    is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
+
+is_hpu = current_platform.is_hpu()
 
 
 class Qwen2MLP(nn.Module):
@@ -106,6 +110,8 @@ class Qwen2Attention(nn.Module):
                  rope_scaling: Optional[Tuple] = None,
                  prefix: str = "") -> None:
         super().__init__()
+        self.enable_zero_padding = os.environ.get('VLLM_ZERO_PADDING',
+                                                  'false').lower() == 'true'
         self.hidden_size = hidden_size
         tp_size = get_tensor_model_parallel_world_size()
         self.total_num_heads = num_heads
@@ -156,8 +162,7 @@ class Qwen2Attention(nn.Module):
                               self.scaling,
                               num_kv_heads=self.num_kv_heads,
                               cache_config=cache_config,
-                              quant_config=quant_config,
-                              prefix=f"{prefix}.attn")
+                              quant_config=quant_config)
 
     def forward(
         self,
@@ -166,10 +171,18 @@ class Qwen2Attention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
+        if (is_hpu and self.enable_zero_padding
+                and attn_metadata.seq_lens_tensor is not None):
+            valid_len = attn_metadata.seq_lens_tensor
+            mask = get_input_mask(hidden_states, valid_len)
+            hidden_states = hidden_states * mask.unsqueeze(-1)
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
+        if (is_hpu and self.enable_zero_padding
+                and attn_metadata.seq_lens_tensor is not None):
+            attn_output = attn_output * mask.unsqueeze(-1)
         output, _ = self.o_proj(attn_output)
         return output
 
@@ -263,6 +276,8 @@ class Qwen2Model(nn.Module):
                              ))
 
         self.config = config
+        self.enable_zero_padding = os.environ.get('VLLM_ZERO_PADDING',
+                                                  'false').lower() == 'true'
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
@@ -317,6 +332,11 @@ class Qwen2Model(nn.Module):
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
         if current_platform.is_hpu():
+            if (self.enable_zero_padding
+                    and attn_metadata.seq_lens_tensor is not None):
+                valid_len = attn_metadata.seq_lens_tensor
+                mask = get_input_mask(hidden_states, valid_len)
+                hidden_states = hidden_states * mask.unsqueeze(-1)
             import habana_frameworks.torch as htorch
             htorch.core.mark_step()
         for i in range(self.start_layer, self.end_layer):
