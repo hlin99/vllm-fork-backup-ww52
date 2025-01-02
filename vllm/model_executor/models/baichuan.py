@@ -475,6 +475,8 @@ class BaiChuanBaseForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
                                         default_weight_loader)
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
+            if is_hpu:
+                torch.hpu.synchronize()
         return loaded_params
 
 
