@@ -132,6 +132,7 @@ class Qwen2Attention(nn.Module):
         self.kv_size = self.num_kv_heads * self.head_dim
         self.scaling = self.head_dim**-0.5
         self.rope_theta = rope_theta
+        self.bias_add_fp32 = True
 
         self.qkv_proj = QKVParallelLinear(
             hidden_size,
@@ -139,6 +140,7 @@ class Qwen2Attention(nn.Module):
             self.total_num_heads,
             self.total_num_kv_heads,
             bias=True,
+            bias_add_fp32=self.bias_add_fp32,
             quant_config=quant_config,
             prefix=f"{prefix}.qkv_proj",
         )
@@ -179,6 +181,10 @@ class Qwen2Attention(nn.Module):
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         q, k = self.rotary_emb(positions, q, k)
+        if self.bias_add_fp32 and q.dtype != hidden_states.dtype:
+            q = q.to(hidden_states.dtype)
+            k = k.to(hidden_states.dtype)
+            v = v.to(hidden_states.dtype)
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         if (is_hpu and self.enable_zero_padding
                 and attn_metadata.seq_lens_tensor is not None):

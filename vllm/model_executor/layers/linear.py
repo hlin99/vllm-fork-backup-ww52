@@ -130,9 +130,15 @@ class UnquantizedLinearMethod(LinearMethodBase):
     def apply(self,
               layer: torch.nn.Module,
               x: torch.Tensor,
-              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+              bias: Optional[torch.Tensor] = None,
+              bias_add_fp32: bool = False) -> torch.Tensor:
 
-        return F.linear(x, layer.weight, bias)
+        if bias_add_fp32 and bias is not None:
+            out = torch.matmul(x, layer.weight.transpose(
+                -2, -1)).float() + bias.float()
+        else:
+            out = F.linear(x, layer.weight, bias)
+        return out
 
 
 class LinearBase(torch.nn.Module):
@@ -275,6 +281,7 @@ class ColumnParallelLinear(LinearBase):
                  input_size: int,
                  output_size: int,
                  bias: bool = True,
+                 bias_add_fp32: bool = False,
                  gather_output: bool = False,
                  skip_bias_add: bool = False,
                  params_dtype: Optional[torch.dtype] = None,
@@ -286,6 +293,7 @@ class ColumnParallelLinear(LinearBase):
 
         self.gather_output = gather_output
         self.collective_func = tensor_model_parallel_all_gather
+        self.bias_add_fp32 = bias_add_fp32
 
         # Divide the weight matrix along the last dimension.
         tp_size = get_tensor_model_parallel_world_size()
@@ -369,7 +377,8 @@ class ColumnParallelLinear(LinearBase):
 
         # Matrix multiply.
         assert self.quant_method is not None
-        output_parallel = self.quant_method.apply(self, input_, bias)
+        output_parallel = self.quant_method.apply(self, input_, bias,
+                                                  self.bias_add_fp32)
         if self.gather_output:
             # All-gather across the partitions.
             output = self.collective_func(output_parallel)
@@ -650,6 +659,7 @@ class QKVParallelLinear(ColumnParallelLinear):
                  total_num_heads: int,
                  total_num_kv_heads: Optional[int] = None,
                  bias: bool = True,
+                 bias_add_fp32: bool = False,
                  skip_bias_add: bool = False,
                  params_dtype: Optional[torch.dtype] = None,
                  quant_config: Optional[QuantizationConfig] = None,
@@ -682,6 +692,7 @@ class QKVParallelLinear(ColumnParallelLinear):
         super().__init__(input_size=input_size,
                          output_size=output_size,
                          bias=bias,
+                         bias_add_fp32=bias_add_fp32,
                          gather_output=False,
                          skip_bias_add=skip_bias_add,
                          params_dtype=params_dtype,
