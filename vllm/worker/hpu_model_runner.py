@@ -142,6 +142,8 @@ def get_decoder_layer_suffix(model_type):
     # be specified here.
     decoder_layer_table = {
         "gpt_bigcode": "BigCodeBlock",
+        "qwen": "QWenBlock",
+        "chatglm": "GLMBlock",
     }
 
     return decoder_layer_table.get(model_type, "DecoderLayer")
