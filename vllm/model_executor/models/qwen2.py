@@ -132,7 +132,9 @@ class Qwen2Attention(nn.Module):
         self.kv_size = self.num_kv_heads * self.head_dim
         self.scaling = self.head_dim**-0.5
         self.rope_theta = rope_theta
-        self.bias_add_fp32 = True
+        # WA for CS-747
+        self.bias_add_fp32 = os.environ.get('VLLM_BIAS_ADD_FP32',
+                                            'true').lower() == 'true'
 
         self.qkv_proj = QKVParallelLinear(
             hidden_size,
@@ -140,7 +142,6 @@ class Qwen2Attention(nn.Module):
             self.total_num_heads,
             self.total_num_kv_heads,
             bias=True,
-            bias_add_fp32=self.bias_add_fp32,
             quant_config=quant_config,
             prefix=f"{prefix}.qkv_proj",
         )
