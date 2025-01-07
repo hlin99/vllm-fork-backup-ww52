@@ -208,7 +208,7 @@ set_numactl
 set_bucketing
 
 ${NUMA_CTL} \
-python ../../benchmarks/benchmark_throughput.py \
+python $BASH_DIR/../../benchmarks/benchmark_throughput.py \
     --backend vllm \
     --model ${model_path} \
     --trust-remote-code \
@@ -223,6 +223,7 @@ python ../../benchmarks/benchmark_throughput.py \
     --max-model-len ${max_model_len} \
     --num-prompts ${num_prompts} \
     --save-results ${case_name}_result.json \
-    --gpu-memory-utilization ${gpu_memory_utilization} \
+    --use-padding-aware-scheduling \
     --num-scheduler-steps ${scheduler_steps} \
+    --gpu-memory-utilization ${gpu_memory_utilization} \
     |& tee ${case_name}.log
