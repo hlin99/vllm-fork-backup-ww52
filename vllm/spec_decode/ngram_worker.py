@@ -12,6 +12,7 @@ from vllm.spec_decode.top1_proposer import Top1Proposer
 
 is_hpu = current_platform.is_hpu()
 
+
 class NGramWorker(NonLLMProposerWorkerBase):
     """NGramWorker provides a light drafter without need for model.
 
@@ -37,7 +38,7 @@ class NGramWorker(NonLLMProposerWorkerBase):
 
     def init_device(self):
         if is_hpu:
-            self.device = torch.device(f"hpu")
+            self.device = torch.device("hpu")
         else:
             self.device = torch.device(f"cuda:{self.local_rank}")
         self.load_model = lambda *args, **kwargs: None

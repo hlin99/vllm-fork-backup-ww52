@@ -2,8 +2,8 @@
 
 # set -x
 
-BASH_DIR=`dirname "${BASH_SOURCE[0]}"`
-source $BASH_DIR/utils.sh
+BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
+source "$BASH_DIR"/utils.sh
 
 Help() {
     # Display Help
@@ -16,7 +16,7 @@ Help() {
     echo "m  Module IDs of the HPUs to use, [0-7], default=None"
     echo "u  URL of the server, str, default=127.0.0.1"
     echo "p  Port number for the server, int, default=30001"
-    echo "d  Data type, str, ['bfloat16'|'float16'|'fp8'], default='bfloat16'"
+    echo "d  Data type, str, ['bfloat16'|'float16'|'fp8'|'awq'|'gptq'], default='bfloat16'"
     echo "i  Input range, str, format='input_min,input_max', default='4,1024'"
     echo "o  Output range, str, format='output_min,output_max', default='4,2048'"
     echo "t  max_num_batched_tokens for vllm, int, default=8192"
@@ -72,9 +72,9 @@ while getopts hw:n:m:u:p:d:i:o:t:l:b:e:c:sfza flag; do
     d) # get data type
         dtype=$OPTARG ;;
     i) # input range
-        input_range=($(echo $OPTARG | tr ',' ' ')) ;;
+        IFS="," read -r -a input_range <<< "$OPTARG" ;;
     o) # output range
-        output_range=($(echo $OPTARG | tr ',' ' ')) ;;
+        IFS="," read -r -a output_range <<< "$OPTARG" ;;
     t) # max-num-batched-tokens
         max_num_batched_tokens=$OPTARG ;;
     l) # max-model-len
@@ -107,17 +107,17 @@ if [ "$model_path" = "" ]; then
     exit
 fi
 
-model_name=$( echo $model_path | awk -F/ '{print $NF}' )
+model_name=$( echo "$model_path" | awk -F/ '{print $NF}' )
 input_min=${input_range[0]}
 input_max=${input_range[1]}
 output_min=${output_range[0]}
 output_max=${output_range[1]}
 
-if [ $input_min == $input_max ]; then
+if [ "$input_min" == "$input_max" ]; then
     disable_zero_padding=true
 fi
 
-if [ $num_hpu -gt 1 ]; then
+if [ "$num_hpu" -gt 1 ]; then
     export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
     unset HLS_MODULE_ID
     if [ "$module_ids" != "None" ]; then
@@ -135,16 +135,35 @@ echo "Starting vllm server for ${model_name} from ${model_path} with input_range
 device=$(hl-smi -Q name -f csv | tail -n 1)
 case_name=serve_${model_name}_${dtype}_${device}_in${input_min}-${input_max}_out${output_min}-${output_max}_bs${max_num_seqs}_tp${num_hpu}_steps${scheduler_steps}_$(date +%F-%H-%M-%S)
 
-if [ "$dtype" == "fp8" ]; then
-    export QUANT_CONFIG=quantization/${model_name}/maxabs_quant_g2.json
-    FP8_FLAGS='--quantization inc --kv-cache-dtype fp8_inc'
-    dtype="bfloat16"
-fi
+case "$dtype" in
+    "bfloat16" | "float16")
+        echo Running with dtype="$dtype" ;;
+    "fp8")
+        echo Running with dtype="$dtype"
+        export QUANT_CONFIG=quantization/${model_name}/maxabs_quant_g2.json
+        QUANT_FLAGS=(--quantization inc --kv-cache-dtype fp8_inc)
+        dtype="bfloat16"
+        ;;
+    "awq")
+        echo Running with AWQ
+        QUANT_FLAGS=(--quantization awq_hpu)
+        dtype="bfloat16"
+        ;;
+    "gptq")
+        echo Running with GPTQ
+        QUANT_FLAGS=(--quantization gptq_hpu)
+        dtype="bfloat16"
+        ;;
+    *)
+        echo Invalid dtype: "$dtype"
+        exit
+        ;;
+esac
 
 if [ "$cache_path" != "" ]; then
     echo "HPU recipe cache will be saved to $cache_path"
     export PT_HPU_RECIPE_CACHE_CONFIG=${cache_path},false,4096
-    mkdir -p ${cache_path}
+    mkdir -p "${cache_path}"
 fi
 
 if [ "$skip_warmup" = "true" ]; then
@@ -184,17 +203,17 @@ set_bucketing
 
 ${NUMA_CTL} \
 python3 -m vllm.entrypoints.openai.api_server \
-    --host ${host} --port ${port} \
-    --model  ${model_path} \
+    --host "${host}" --port "${port}" \
+    --model  "${model_path}" \
     --trust-remote-code \
-    --tensor-parallel-size ${num_hpu} \
-    --dtype ${dtype} \
-    ${FP8_FLAGS} \
-    --block-size ${block_size} \
-    --max-num-seqs $max_num_seqs \
-    --max-num-batched-tokens $max_num_batched_tokens \
-    --max-model-len $max_model_len \
+    --tensor-parallel-size "${num_hpu}" \
+    --dtype "${dtype}" \
+    "${QUANT_FLAGS[@]}" \
+    --block-size "${block_size}" \
+    --max-num-seqs "$max_num_seqs" \
+    --max-num-batched-tokens "$max_num_batched_tokens" \
+    --max-model-len "$max_model_len" \
     --use-padding-aware-scheduling \
-    --num-scheduler-steps ${scheduler_steps} \
-    --gpu-memory-utilization ${gpu_memory_utilization} \
-    |& tee ${case_name}.log
+    --num-scheduler-steps "${scheduler_steps}" \
+    --gpu-memory-utilization "${gpu_memory_utilization}" \
+    |& tee "${case_name}".log

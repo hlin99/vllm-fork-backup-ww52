@@ -36,7 +36,8 @@ class AWQHPUConfig(QuantizationConfig):
                 f"group_size={self.group_size}, "
                 f"zero_point={self.zero_point})")
 
-    def get_name(self) -> str:
+    @classmethod
+    def get_name(cls) -> str:
         return "awq_hpu"
 
     def get_supported_act_dtypes(self) -> List[torch.dtype]:
@@ -69,7 +70,7 @@ class AWQHPUConfig(QuantizationConfig):
         is_valid_user_quant = user_quant == "awq_hpu"
 
         if is_valid_user_quant:
-            return cls.get_name(cls)
+            return cls.get_name()
 
         return None
 

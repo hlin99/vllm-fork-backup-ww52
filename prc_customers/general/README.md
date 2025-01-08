@@ -38,7 +38,7 @@ options:
 w  Weights of the model, could be model id in huggingface or local path
 n  Number of HPU to use, [1-8], default=1
 m  Module IDs of the HPUs to use, [0-7], default=None
-d  Data type, str, ['bfloat16'|'float16'|'fp8'], default='bfloat16'
+d  Data type, str, ['bfloat16'|'float16'|'fp8'|'awq'|'gptq'], default='bfloat16'
 i  Input length, int, default=1024
 o  Output length, int, default=512
 r  Ratio for min input/output length to generate an uniform distributed input/out length, float, default=1.0
@@ -84,7 +84,7 @@ n  Number of HPU to use, [1-8], default=1
 m  Module IDs of the HPUs to use, [0-7], default=None
 u  URL of the server, str, default=127.0.0.1
 p  Port number for the server, int, default=30001
-d  Data type, str, ['bfloat16'|'float16'|'fp8'], default='bfloat16'
+d  Data type, str, ['bfloat16'|'float16'|'fp8'|'awq'|'gptq'], default='bfloat16'
 i  Input range, str, format='input_min,input_max', default='4,1024'
 o  Output range, str, format='output_min,output_max', default='4,2048'
 t  max_num_batched_tokens for vllm, int, default=8192
@@ -109,13 +109,13 @@ bash benchmark_serving_range.sh # to benchmark with specified input/output range
 bash benchmark_serving_sharegpt.sh # to benchmark with ShareGPT dataset
 ```
 
-> Note that the input/output ranges passed to `start_gaudi_vllm_server.sh` shouled cover the following benchmark ranges to get expected performance.
+> The input/output ranges passed to `start_gaudi_vllm_server.sh` should cover the following benchmark ranges to get expected performance.
 
-> Note that the parameters in the `benchmark_serving_range.sh` and `benchmark_serving_sharegpt.sh` have to be modified to match the ones passed to `start_gaudi_vllm_server.sh`.
+> The parameters in the `benchmark_serving_range.sh` and `benchmark_serving_sharegpt.sh` must be modified to match the ones passed to `start_gaudi_vllm_server.sh`.
 
 
 ## Handling of the long warm-up time
-We can cache the recipe to disk and skip warm-up during the benchmark to save warm-up time. So our customers and ourselves don’t have to wait for the long warm-up time, and we could get the best performance of vLLM on Gaudi.
+We can cache the recipe to disk and skip warm-up during the benchmark to save warm-up time. So, our customers and ourselves don’t have to wait for the long warm-up time, and we could get the best performance of vLLM on Gaudi.
 
 ### For throughput benchmark:
 1. Run `benchmark_throughput.sh` with `-c <recipe path>` and without `-s` to create and save the recipe cache.
@@ -127,9 +127,10 @@ We can cache the recipe to disk and skip warm-up during the benchmark to save wa
 2. Release the cached recipe files along with the vllm code to the customer.
 3. Run `start_gaudi_vllm_server.sh` with `-c <recipe path>` and with `-s` to skip warm-up.
 
-> We can also skip warm-up at the 1st setp and run the benchmark twice, one for warm-up and the other one for collecting of the performance data. This approach have the risk of some missing warm-up bucketing as the scheduling of the two rounds of benchmark may not be exactly the same.
+> We can also skip warm-up at the 1st step and run the benchmark twice, one for warm-up and the other one for collecting of the performance data. This approach has the risk of some missing warm-up bucketing as the scheduling of the two rounds of benchmark may not be exactly the same.
 
-## Handling of the accuracy issue for some PRC models
+## FAQs
+### Handling of the accuracy issue for some PRC models
 Currently the `block_softmax` using global max cause accuracy issue for some PRC models. Habana RnD team provided a temp fix to this with about 30% perf drop.  Please set `export VLLM_PA_SOFTMAX_IMPL=scatter_reduce` before calling of `start_gaudi_vllm_server.sh` and `benchmark_throughput.sh` to apply this fix.
 Please refer to [issue-275](https://github.com/HabanaAI/vllm-fork/issues/275) for more details.
 
@@ -137,22 +138,41 @@ We found some models may have low lm_eval score when running with bf16 format. P
 
 > The models listed in the [Supported Configurations](https://github.com/HabanaAI/vllm-fork/blob/habana_main/README_GAUDI.md#supported-configurations) don't have this accuracy issue.
 
-## Handling of not enough KV cache space warning
+### Handling of not enough KV cache space warning
 When there are warnings of "Sequence group xxx is preempted by PreemptionMode.RECOMPUTE mode because there is not enough KV cache space.", please try to decrease the max_num_seqs value, e.g. to 64. This warning can happen when running benchmark_throughtput with fixed input/output.
 
-## About FusedSDPA
+### About FusedSDPA
 [FusedSDPA](https://docs.habana.ai/en/latest/PyTorch/Model_Optimization_PyTorch/Optimization_in_PyTorch_Models.html#using-fused-scaled-dot-product-attention-fusedsdpa) could be used in vLLM prompt stage and it’s enabled by default to save device memory especially for long prompts. While it’s not compatible with Alibi yet, please disable it for models with Alibi.
 
-## Handling of the long sequence request
+### Handling of the long sequence request
 For the long input/output cases, such as 20k/0.5k input/output, please modify the model length to be larger than `max(input_length) + max(output_length)`. For example, set `max_position_embeddings=32768` in the `config.json` file of LLaMA models.
 
-## About fp8 benchmark
+### About fp8 benchmark
 Please follow the [FP8 Calibration Procedure](https://github.com/HabanaAI/vllm-hpu-extension/tree/main/calibration#fp8-calibration-procedure) to get the quantization data before running of the benchmarks.
 
-## Tuning the device memory usage
-The environment variables `VLLM_GRAPH_RESERVED_MEM`, `VLLM_GRAPH_PROMPT_RATIO` and `VLLM_GPU_MEMORY_UTILIZATION` could be used to tune the detailed usage of device memory, please refer to [HPU Graph capture]( https://github.com/HabanaAI/vllm-fork/blob/habana_main/README_GAUDI.md#hpu-graph-capture) for more details.
+## Tuning vLLM on Gaudi
+### Setup the bucketing
+The `set_bucketing()` from `utils.sh` is used to setup the bucketing parameters according to the input/output range, max_num_batched_tokens and max_num_seqs etc. The settings could also be override by manually set the corresponding ENVs. Please refer to [bucketing mechanism](https://github.com/HabanaAI/vllm-fork/blob/habana_main/README_GAUDI.md#bucketing-mechanism) for more details.
 
-## Profile the LLM engine
+### Tuning the device memory usage
+The environment variables `VLLM_GRAPH_RESERVED_MEM`, `VLLM_GRAPH_PROMPT_RATIO` and `VLLM_GPU_MEMORY_UTILIZATION` could be used to tune the detailed usage of device memory, please refer to [HPU Graph capture](https://github.com/HabanaAI/vllm-fork/blob/habana_main/README_GAUDI.md#hpu-graph-capture) for more details.
+
+### Setup NUMA
+vLLM is a CPU-heavy workload and the host processes are better to bound to the CPU cores and memory node of the selected devices if they are on the same NUMA node. The `set_numactl()` from `utils.sh` is used to setup the NUMA bounding for the module_id specified by `-m` according to the output of `hl-smi topo -c -N`.
+``` {.}
+modID   CPU Affinity    NUMA Affinity    
+-----   ------------    -------------    
+0       0-39, 80-119    0  
+1       0-39, 80-119    0  
+2       0-39, 80-119    0  
+3       0-39, 80-119    0  
+4       40-79, 120-159          1  
+5       40-79, 120-159          1  
+6       40-79, 120-159          1  
+7       40-79, 120-159          1
+```
+
+### Profile the LLM engine
 The following 4 ENVs are used to control the device profiling:
 - `VLLM_DEVICE_PROFILER_ENABLED`, set to `true` to enable device profiler.
 - `VLLM_DEVICE_PROFILER_WARMUP_STEPS`, number of steps to ignore for profiling.

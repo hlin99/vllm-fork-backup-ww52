@@ -2,8 +2,8 @@
 
 # set -x
 
-BASH_DIR=`dirname "${BASH_SOURCE[0]}"`
-source $BASH_DIR/utils.sh
+BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
+source "$BASH_DIR"/utils.sh
 
 Help() {
     # Display Help
@@ -14,7 +14,7 @@ Help() {
     echo "w  Weights of the model, could be model id in huggingface or local path"
     echo "n  Number of HPU to use, [1-8], default=1"
     echo "m  Module IDs of the HPUs to use, [0-7], default=None"
-    echo "d  Data type, str, ['bfloat16'|'float16'|'fp8'], default='bfloat16'"
+    echo "d  Data type, str, ['bfloat16'|'float16'|'fp8'|'awq'|'gptq'], default='bfloat16'"
     echo "i  Input length, int, default=1024"
     echo "o  Output length, int, default=512"
     echo "r  Ratio for min input/output length to generate an uniform distributed input/out length, float, default=1.0"
@@ -72,9 +72,9 @@ while getopts hw:n:m:d:i:o:r:j:t:l:b:p:e:c:sfza flag; do
     d) # get data type
         dtype=$OPTARG ;;
     i) # input range
-        input_len=($(echo $OPTARG | tr ',' ' ')) ;;
+        input_len=$OPTARG ;;
     o) # output range
-        output_len=($(echo $OPTARG | tr ',' ' ')) ;;
+        output_len=$OPTARG ;;
     r) # ratio of min length
         len_ratio=$OPTARG ;;
     j) # json path
@@ -113,9 +113,9 @@ if [ "$model_path" = "" ]; then
     exit
 fi
 
-model_name=$( echo $model_path | awk -F/ '{print $NF}' )
+model_name=$( echo "$model_path" | awk -F/ '{print $NF}' )
 
-if [ $num_hpu -gt 1 ]; then
+if [ "$num_hpu" -gt 1 ]; then
     export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
     unset HLS_MODULE_ID
     if [ "$module_ids" != "None" ]; then
@@ -134,7 +134,7 @@ if [ "$json_path" != "" ]; then
     input_max=1024
     output_min=4
     output_max=2048
-    io_config="--dataset $json_path"
+    IO_FLAGS=(--dataset "$json_path")
     echo "Benchmarking throughput for ${model_name} from ${model_path} using ${num_prompts} random prompts from ${json_path} with max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using ${num_hpu} HPUs with module_ids=${module_ids}"
     case_name="benchmark_throughput_${model_name}_${dtype}_${device}_sharegpt_bs${max_num_seqs}_tp${num_hpu}_step${scheduler_steps}_$(date +%F-%H-%M-%S)"
 elif [ "$len_ratio" == "1.0" ]; then
@@ -143,8 +143,7 @@ elif [ "$len_ratio" == "1.0" ]; then
     output_min=$output_len
     output_max=$output_len
     disable_zero_padding=true
-    io_config="--input-len $input_len \
-                --output-len $output_len"
+    IO_FLAGS=(--input-len "$input_len" --output-len "$output_len")
     echo "Benchmarking throughput for ${model_name} from ${model_path} using ${num_prompts} fixed-length prompts with input_len=${input_len}, output_len=${output_len}, max_num_seqs=${max_num_seqs}, max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using ${num_hpu} HPUs with module_ids=${module_ids}"
     case_name="benchmark_throughput_${model_name}_${dtype}_${device}_in${input_len}_out${output_len}_bs${max_num_seqs}_tp${num_hpu}_step${scheduler_steps}_$(date +%F-%H-%M-%S)"
 else
@@ -152,24 +151,40 @@ else
     input_max=$input_len
     output_min=$(bc <<< "($output_len * $len_ratio + 0.5) / 1")
     output_max=$output_len
-    io_config="--dataset random \
-                --random-input-len $input_len \
-                --random-output-len $output_len \
-                --random-range-ratio $len_ratio"
+    IO_FLAGS=(--dataset random --random-input-len "$input_len" --random-output-len "$output_len" --random-range-ratio "$len_ratio")
     echo "Benchmarking throughput for ${model_name} from ${model_path} using ${num_prompts} random-length prompts with input_range=[${input_min}, ${input_max}], output_range=[${output_min}, ${output_max}], max_num_seqs=${max_num_seqs}, max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using ${num_hpu} HPUs with module_ids=${module_ids}"
     case_name="benchmark_throughput_${model_name}_${dtype}_${device}_in${input_min}-${input_max}_out${output_min}-${output_max}_bs${max_num_seqs}_tp${num_hpu}_step${scheduler_steps}_$(date +%F-%H-%M-%S)"
 fi
 
-if [ "$dtype" == "fp8" ]; then
-    export QUANT_CONFIG=quantization/${model_name}/maxabs_quant_g2.json
-    FP8_FLAGS='--quantization inc --kv-cache-dtype fp8_inc'
-    dtype="bfloat16"
-fi
+case "$dtype" in
+    "bfloat16" | "float16")
+        echo Running with dtype="$dtype" ;;
+    "fp8")
+        echo Running with dtype="$dtype"
+        export QUANT_CONFIG=quantization/${model_name}/maxabs_quant_g2.json
+        QUANT_FLAGS=(--quantization inc --kv-cache-dtype fp8_inc)
+        dtype="bfloat16"
+        ;;
+    "awq")
+        echo Running with AWQ
+        QUANT_FLAGS=(--quantization awq_hpu)
+        dtype="bfloat16"
+        ;;
+    "gptq")
+        echo Running with GPTQ
+        QUANT_FLAGS=(--quantization gptq_hpu)
+        dtype="bfloat16"
+        ;;
+    *)
+        echo Invalid dtype: "$dtype"
+        exit
+        ;;
+esac
 
 if [ "$cache_path" != "" ]; then
     echo "HPU recipe cache will be saved to $cache_path"
     export PT_HPU_RECIPE_CACHE_CONFIG=${cache_path},false,4096
-    mkdir -p ${cache_path}
+    mkdir -p "${cache_path}"
 fi
 
 if [ "$skip_warmup" = "true" ]; then
@@ -179,7 +194,7 @@ fi
 
 if [ "$profile" = "true" ]; then
     echo "VLLM_PROFILER_ENABLED is set to True"
-    export export VLLM_PROFILER_ENABLED=True
+    export VLLM_PROFILER_ENABLED=True
     export VLLM_PROFILE_FILE=${case_name}_profile.json
 fi
 
@@ -208,22 +223,23 @@ set_numactl
 set_bucketing
 
 ${NUMA_CTL} \
-python $BASH_DIR/../../benchmarks/benchmark_throughput.py \
+python "$BASH_DIR/../../benchmarks/benchmark_throughput.py" \
     --backend vllm \
-    --model ${model_path} \
+    --model "${model_path}" \
     --trust-remote-code \
-    --tensor-parallel-size ${num_hpu} \
-    $io_config \
+    --tensor-parallel-size "${num_hpu}" \
+    "${IO_FLAGS[@]}" \
     --device hpu \
-    --dtype ${dtype} \
-    ${FP8_FLAGS} \
+    --dtype "${dtype}" \
+    "${QUANT_FLAGS[@]}" \
     --seed 0 \
-    --max-num-seqs ${max_num_seqs} \
-    --max-num-batched-tokens ${max_num_batched_tokens} \
-    --max-model-len ${max_model_len} \
-    --num-prompts ${num_prompts} \
-    --save-results ${case_name}_result.json \
+    --block-size "${block_size}" \
+    --max-num-seqs "${max_num_seqs}" \
+    --max-num-batched-tokens "${max_num_batched_tokens}" \
+    --max-model-len "${max_model_len}" \
+    --num-prompts "${num_prompts}" \
+    --save-results "${case_name}"_result.json \
     --use-padding-aware-scheduling \
-    --num-scheduler-steps ${scheduler_steps} \
-    --gpu-memory-utilization ${gpu_memory_utilization} \
-    |& tee ${case_name}.log
+    --num-scheduler-steps "${scheduler_steps}" \
+    --gpu-memory-utilization "${gpu_memory_utilization}" \
+    |& tee "${case_name}".log

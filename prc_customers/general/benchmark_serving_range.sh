@@ -28,6 +28,6 @@ python ../../benchmarks/benchmark_serving.py \
     --request-rate $request_rate \
     --seed 0 \
     --save-result \
-    --result-filename ${log_name}.json \
+    --result-filename "${log_name}".json \
     --ignore-eos \
-    |& tee ${log_name}.log 2>&1
+    |& tee "${log_name}".log 2>&1
