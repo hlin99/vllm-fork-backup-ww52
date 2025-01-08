@@ -134,7 +134,7 @@ We can cache the recipe to disk and skip warm-up during the benchmark to save wa
 Currently the `block_softmax` using global max cause accuracy issue for some PRC models. Habana RnD team provided a temp fix to this with about 30% perf drop.  Please set `export VLLM_PA_SOFTMAX_IMPL=scatter_reduce` before calling of `start_gaudi_vllm_server.sh` and `benchmark_throughput.sh` to apply this fix.
 Please refer to [issue-275](https://github.com/HabanaAI/vllm-fork/issues/275) for more details.
 
-We found some models may have low lm_eval score when running with bf16 format. Please try to set `VLLM_WA_FOR_QK_UNDERFLOW=true`, `VLLM_USE_FP32_SOFTMAX=true` and `VLLM_PROMPT_USE_FUSEDSDPA=false` to improve the accuracy.
+We found some models may have low lm_eval score when running with bf16 format. Please try to set `VLLM_PRESERVE_QK_FP32_ACCUM_RES=true`, `VLLM_USE_FP32_SOFTMAX=true` and `VLLM_PROMPT_USE_FUSEDSDPA=false` to improve the accuracy.
 
 > The models listed in the [Supported Configurations](https://github.com/HabanaAI/vllm-fork/blob/habana_main/README_GAUDI.md#supported-configurations) don't have this accuracy issue.
 
