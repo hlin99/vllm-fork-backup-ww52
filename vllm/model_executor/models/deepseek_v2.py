@@ -22,6 +22,7 @@
 """Inference-only DeepseekV2 model."""
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
+import os
 import torch
 from torch import nn
 from transformers import PretrainedConfig
@@ -53,7 +54,7 @@ from vllm.sequence import IntermediateTensors
 from .interfaces import SupportsPP
 from .utils import (PPMissingLayer, is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers,
-                    maybe_prefix)
+                    maybe_prefix, get_input_mask)
 
 is_hpu = current_platform.is_hpu()
 
@@ -201,6 +202,8 @@ class DeepseekV2Attention(nn.Module):
         prefix: str = "",
     ) -> None:
         super().__init__()
+        self.enable_zero_padding = os.environ.get('VLLM_ZERO_PADDING',
+                                                  'false').lower() == 'true'
         self.hidden_size = hidden_size
         self.qk_nope_head_dim = qk_nope_head_dim
         self.qk_rope_head_dim = qk_rope_head_dim
@@ -297,6 +300,11 @@ class DeepseekV2Attention(nn.Module):
             _batch_size = positions.shape[0]
             positions = positions.reshape(positions.shape[0] *
                                           positions.shape[1])
+            if (self.enable_zero_padding
+                    and attn_metadata.seq_lens_tensor is not None):
+                valid_len = attn_metadata.seq_lens_tensor
+                mask = get_input_mask(hidden_states, valid_len)
+                hidden_states = hidden_states * mask.unsqueeze(-1)
             hidden_states = hidden_states.reshape(
                 hidden_states.shape[0] * hidden_states.shape[1],
                 hidden_states.shape[2])
@@ -349,11 +357,10 @@ class DeepseekV2Attention(nn.Module):
             k = k.reshape(_batch_size, k.shape[0] // _batch_size, k.shape[1])
             v = v.reshape(_batch_size, v.shape[0] // _batch_size, v.shape[1])
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
-        if is_hpu:
-            # need restore from tensor(x0, y0, z0) to tensor(x1, y1) for hpu
-            attn_output = attn_output.reshape(
-                attn_output.shape[0] * attn_output.shape[1],
-                attn_output.shape[2])
+        if (is_hpu and self.enable_zero_padding
+                and attn_metadata.seq_lens_tensor is not None):
+            attn_output = attn_output * mask.unsqueeze(-1)
+
         attn_output = attn_output.view(
             -1, self.num_local_heads, 256)[..., :self.v_head_dim].reshape(
                 -1, self.num_local_heads * self.v_head_dim)
@@ -468,7 +475,8 @@ class DeepseekV2Model(nn.Module):
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
-
+        self.enable_zero_padding = os.environ.get('VLLM_ZERO_PADDING',
+                                                  'false').lower() == 'true'
         config = vllm_config.model_config.hf_config
         cache_config = vllm_config.cache_config
         quant_config = vllm_config.quant_config
@@ -525,12 +533,22 @@ class DeepseekV2Model(nn.Module):
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
 
+        if is_hpu:
+            if (self.enable_zero_padding
+                    and attn_metadata.seq_lens_tensor is not None):
+                valid_len = attn_metadata.seq_lens_tensor
+                mask = get_input_mask(hidden_states, valid_len)
+                hidden_states = hidden_states * mask.unsqueeze(-1)
+            import habana_frameworks.torch as htorch
+            htorch.core.mark_step()
+
         for i in range(self.start_layer, self.end_layer):
             layer = self.layers[i]
             hidden_states, residual = layer(positions, hidden_states,
                                             kv_caches[i - self.start_layer],
                                             attn_metadata, residual)
-
+            if is_hpu:
+                htorch.core.mark_step()
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({
                 "hidden_states": hidden_states,
