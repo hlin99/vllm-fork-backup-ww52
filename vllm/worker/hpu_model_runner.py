@@ -29,6 +29,7 @@ from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import DeviceConfig, VllmConfig
 from vllm.distributed import broadcast_tensor_dict
 from vllm.distributed.parallel_state import get_world_group
+from vllm.inputs import INPUT_REGISTRY, InputRegistry
 from vllm.logger import init_logger
 from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
@@ -42,7 +43,7 @@ from vllm.model_executor.model_loader import get_model
 from vllm.model_executor.models import supports_multimodal
 from vllm.model_executor.sampling_metadata import SequenceGroupToSample
 from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
-                             MultiModalKwargs)
+                             MultiModalKwargs, MultiModalRegistry)
 from vllm.sampling_params import SamplingParams
 from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
                            Logprob, SequenceData, SequenceGroupMetadata,
@@ -513,6 +514,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
         return_hidden_states: bool = False,
+        input_registry: InputRegistry = INPUT_REGISTRY,
+        mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
     ):
         ModelRunnerBase.__init__(self, vllm_config=vllm_config)
         self.is_driver_worker = is_driver_worker
@@ -520,8 +523,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         self.sliding_window = (self.model_config.get_sliding_window()
                                if self.model_config is not None else None)
-        self.device_config = (self.device_config if self.device_config
-                              is not None else DeviceConfig())
+        self.device_config = (vllm_config.device_config
+                              if vllm_config is not None else DeviceConfig())
         if is_fake_hpu():
             self.device_config.device = torch.device('cpu')
             self.device_config.device_type = 'cpu'
@@ -550,6 +553,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.block_size,
             self.model_config.is_attention_free,
         ) if needs_attn_backend else None
+
+        # Multi-modal data support
+        self.input_registry = input_registry
+        self.mm_registry = mm_registry
 
         # Lazy initialization
         self.lora_manager: LRUCacheWorkerLoRAManager = None
@@ -595,6 +602,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # Multi-modal data support
         self.multi_modal_input_mapper = MULTIMODAL_REGISTRY \
             .create_input_mapper(self.model_config)
+        self.mm_registry.init_mm_limits_per_prompt(self.model_config)
 
         self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
                                           'false').lower() == 'true'
@@ -911,7 +919,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             multi_modal_placeholder_index_maps=
             None  # FIXME(kzawora): mutli-modality will not work here
         )
-        multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_kwargs_list)
+        multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_kwargs_list,
+                                                    device=self.device)
 
         return PreparePromptMetadata(input_tokens=input_tokens,
                                      input_positions=input_positions,

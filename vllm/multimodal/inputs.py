@@ -1,6 +1,6 @@
 from collections import UserDict, defaultdict
-from typing import (Any, Dict, List, Literal, Mapping, Sequence, Tuple,
-                    TypedDict, TypeVar, Union, cast, final)
+from typing import (Any, Dict, List, Literal, Mapping, Optional, Sequence,
+                    Tuple, TypedDict, TypeVar, Union, cast, final)
 
 import numpy as np
 import torch
@@ -115,7 +115,9 @@ class MultiModalKwargs(UserDict[str, NestedTensors]):
     """
 
     @staticmethod
-    def _try_stack(nested_tensors: NestedTensors) -> NestedTensors:
+    def _try_stack(
+            nested_tensors: NestedTensors,
+            device: Optional[torch.types.Device] = None) -> NestedTensors:
         """
         Stack the inner dimensions that have the same shape in
         a nested list of tensors.
@@ -124,13 +126,21 @@ class MultiModalKwargs(UserDict[str, NestedTensors]):
         dimensions are different for each element along that dimension.
         """
         if isinstance(nested_tensors, torch.Tensor):
+            if device is not None:
+                nested_tensors = nested_tensors.to(device)
             return nested_tensors
 
         # TODO: Remove these once all models have been migrated
         if isinstance(nested_tensors, np.ndarray):
-            return torch.from_numpy(nested_tensors)
+            if device is not None:
+                return torch.from_numpy(nested_tensors).to(device)
+            else:
+                return torch.from_numpy(nested_tensors)
         if isinstance(nested_tensors, (int, float)):
-            return torch.tensor(nested_tensors)
+            if device is not None:
+                return torch.tensor(nested_tensors).to(device)
+            else:
+                return torch.tensor(nested_tensors)
 
         stacked = [MultiModalKwargs._try_stack(t) for t in nested_tensors]
         if not is_list_of(stacked, torch.Tensor, check="all"):
@@ -141,11 +151,16 @@ class MultiModalKwargs(UserDict[str, NestedTensors]):
         if any(t.shape != tensors_[0].shape for t in tensors_):
             # The tensors have incompatible shapes and can't be stacked.
             return tensors_
-
-        return torch.stack(tensors_)
+        if device is not None:
+            return torch.stack(tensors_).to(device)
+        else:
+            return torch.stack(tensors_)
 
     @staticmethod
-    def batch(inputs_list: List["MultiModalKwargs"]) -> BatchedTensorInputs:
+    def batch(
+            inputs_list: List["MultiModalKwargs"],
+            device: Optional[torch.types.Device] = None
+    ) -> BatchedTensorInputs:
         """
         Batch multiple inputs together into a dictionary.
 
@@ -153,7 +168,7 @@ class MultiModalKwargs(UserDict[str, NestedTensors]):
         If the corresponding value from each input is a tensor and they all
         share the same shape, the output value is a single batched tensor;
         otherwise, the output value is a list containing the original value
-        from each input.
+        from each input. 
         """
         if len(inputs_list) == 0:
             return {}
@@ -167,7 +182,7 @@ class MultiModalKwargs(UserDict[str, NestedTensors]):
                 item_lists[k].append(v)
 
         return {
-            k: MultiModalKwargs._try_stack(item_list)
+            k: MultiModalKwargs._try_stack(item_list, device=device)
             for k, item_list in item_lists.items()
         }
 
