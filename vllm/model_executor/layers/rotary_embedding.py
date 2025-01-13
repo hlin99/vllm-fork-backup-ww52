@@ -416,7 +416,9 @@ def _yarn_linear_ramp_mask(low: float, high: float, dim: int,
     if low == high:
         high += 0.001  # Prevent singularity
 
-    linear_func = (torch.arange(dim, dtype=dtype) - low) / (high - low)
+    linear_func = (
+        torch.arange(dim, dtype=dtype, device="hpu" if is_hpu else "cuda") -
+        low) / (high - low)
     ramp_func = torch.clamp(linear_func, 0, 1)
     return ramp_func
 
