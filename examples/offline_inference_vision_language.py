@@ -281,6 +281,23 @@ def run_qwen_vl(question: str, modality: str):
     return llm, prompt, stop_token_ids
 
 
+# Qwen
+def run_qwen_vl_chat(question: str, modality: str):
+    llm = LLM(
+        model="Qwen/Qwen-VL-Chat",
+        trust_remote_code=True,
+        max_num_seqs=5,
+    )
+    query = f"Picture 1: <img></img>\n{question}"
+    im_start, im_end = "<|im_start|>", "<|im_end|>"
+    system_text = "system\nYou are a helpful assistant."
+    raw_text = f"{im_start}{system_text}{im_end}"
+    raw_text += f"\n{im_start}user\n{query}{im_end}\n{im_start}assistant\n"
+    prompt = raw_text
+    stop_token_ids = None
+    return llm, prompt, stop_token_ids
+
+
 # Qwen2-VL
 def run_qwen2_vl(question: str, modality: str):
     assert modality == "image"
@@ -417,6 +434,7 @@ model_example_map = {
     "internvl_chat": run_internvl,
     "NVLM_D": run_nvlm_d,
     "qwen_vl": run_qwen_vl,
+    "qwen_vl_chat": run_qwen_vl_chat,
     "qwen2_vl": run_qwen2_vl,
     "pixtral_hf": run_pixtral_hf,
     "mllama": run_mllama,

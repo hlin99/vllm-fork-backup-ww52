@@ -148,9 +148,17 @@ class MultiModalKwargs(UserDict[str, NestedTensors]):
             return stacked
 
         tensors_ = cast(List[torch.Tensor], stacked)
+
         if any(t.shape != tensors_[0].shape for t in tensors_):
-            # The tensors have incompatible shapes and can't be stacked.
-            return tensors_
+            if any(t.shape[1:] != tensors_[0].shape[1:] for t in tensors_):
+                # The tensors have incompatible shapes and can't be stacked.
+                return tensors_
+            else:
+                if device is not None:
+                    return torch.cat(tensors_, dim=0).to(device)
+                else:
+                    return torch.cat(tensors_, dim=0)
+
         if device is not None:
             return torch.stack(tensors_).to(device)
         else:
@@ -168,7 +176,7 @@ class MultiModalKwargs(UserDict[str, NestedTensors]):
         If the corresponding value from each input is a tensor and they all
         share the same shape, the output value is a single batched tensor;
         otherwise, the output value is a list containing the original value
-        from each input. 
+        from each input.
         """
         if len(inputs_list) == 0:
             return {}
