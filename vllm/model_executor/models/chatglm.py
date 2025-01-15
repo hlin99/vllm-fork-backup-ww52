@@ -526,14 +526,13 @@ class ChatGLMModel(nn.Module):
         if pixel_values is not None and self.vision_config_flag is not None:
             image_embeds = self.vision(pixel_values)
 
-        if pixel_values is not None and self.vision is not None:
-
-            batch_size, seq_length = input_ids.shape
-
-            img_idx = img_idx.reshape(batch_size, -1)
-            img_position_ids = img_position_ids.reshape(batch_size, -1)
-            for i in range(batch_size):
-                inputs_embeds[i].index_copy_(0, img_idx[i], image_embeds[i])
+        if pixel_values is not None and self.vision is not None:            
+            batch_size, seq_length, hidden_size = inputs_embeds.shape
+            inputs_embeds = inputs_embeds.reshape(-1,hidden_size)
+            image_embeds = image_embeds.reshape(-1,hidden_size)
+            img_idx = img_idx.reshape(-1)
+            inputs_embeds.index_copy_(0, img_idx, image_embeds)
+            inputs_embeds = inputs_embeds.reshape(batch_size, seq_length, hidden_size)
 
         # Run encoder.
         hidden_states = self.encoder(
