@@ -21,6 +21,7 @@ To install Pillow-SIMD, run the following:
 pip uninstall pillow
 CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
 ``` 
+> We also provide HPU MediaPipe for the image processing for Qwen-VL. Enable it by exporting `USE_HPU_MEDIA=true`. You may enable your models with this feature via referring to the changes in qwen.py.
 4. `cd prc_customers/general`
 
 

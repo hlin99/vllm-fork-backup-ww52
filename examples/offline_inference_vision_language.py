@@ -5,12 +5,17 @@ the correct prompt format on vision language models for text generation.
 For most models, the prompt format should follow corresponding examples
 on HuggingFace model repository.
 """
+import os
+
 from transformers import AutoTokenizer
 
 from vllm import LLM, SamplingParams
+from vllm.assets.base import get_vllm_public_assets
 from vllm.assets.image import ImageAsset
 from vllm.assets.video import VideoAsset
 from vllm.utils import FlexibleArgumentParser
+
+VLM_IMAGES_DIR = "vision_model_images"
 
 # NOTE: The default `max_num_seqs` and `max_model_len` may result in OOM on
 # lower-end GPUs.
@@ -453,8 +458,14 @@ def get_multi_modal_input(args):
     """
     if args.modality == "image":
         # Input image and question
-        image = ImageAsset("cherry_blossom") \
+        if os.environ.get('USE_HPU_MEDIA', 'false').lower() == 'true':
+            image = str(
+                get_vllm_public_assets("cherry_blossom.jpg",
+                                       s3_prefix=VLM_IMAGES_DIR).resolve())
+        else:
+            image = ImageAsset("cherry_blossom") \
             .pil_image.convert("RGB")
+
         img_question = "What is the content of this image?"
 
         return {

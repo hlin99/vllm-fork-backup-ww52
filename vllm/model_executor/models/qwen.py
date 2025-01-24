@@ -709,7 +709,7 @@ def input_processor_for_qwen(ctx: InputContext,
             raise ValueError(
                 f"Expected img embeds to be have 3 dimensions, got {num_dims}")
         num_images = 1 if num_dims == 2 else image_data.shape[0]
-    elif isinstance(image_data, Image.Image):
+    elif isinstance(image_data, (Image.Image, str)):
         num_images = 1
     elif is_list_of(image_data, Image.Image):
         num_images = len(image_data)
@@ -811,6 +811,9 @@ def input_mapper_for_qwen(ctx: InputContext, data: object) -> MultiModalKwargs:
                 f"[# images, {MAX_QWEN_IMG_TOKENS}, {img_emb_size}], but "
                 f"received shape [{data.shape}]")
         pixel_values = data
+    elif isinstance(data, str):
+        model_config.media_queue.put([data])
+        pixel_values = next(model_config.media_iter)
     else:
         transform = build_normalization_transform(image_size)
         if not isinstance(data, (list, tuple)):
