@@ -126,8 +126,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
     def init_device(self) -> None:
         if self.device_config.device.type == "hpu":
+            torch.hpu.set_device(0)
             self.device = torch.device("hpu")
-            torch.hpu.set_device(self.device)
         elif self.device_config.device_type == "cpu":
             self.device = torch.device("cpu")
         else:
