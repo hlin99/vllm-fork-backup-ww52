@@ -391,6 +391,7 @@ class BertEmbeddingModel(nn.Module):
         self.model = self._build_model(vllm_config=vllm_config,
                                        prefix=maybe_prefix(prefix, "model"))
         self._pooler = self._build_pooler(pooler_config)
+        self.is_causal = False
 
     def forward(
         self,

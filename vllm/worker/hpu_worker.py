@@ -23,6 +23,7 @@ from vllm.sequence import ExecuteModelRequest
 from vllm.utils import hpu_backend_string, hpu_device_string, is_fake_hpu
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.hpu_model_runner import HPUModelRunner
+from vllm.worker.hpu_embedding_model_runner import HPUEmbeddingModelRunner
 from vllm.worker.worker_base import (LocalOrDistributedWorkerBase, WorkerBase,
                                      WorkerInput)
 
@@ -74,6 +75,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         ModelRunnerClass: Type[HPUModelRunner] = HPUModelRunner
         if model_runner_cls is not None:
             ModelRunnerClass = model_runner_cls
+        elif model_config.task == "embedding":
+            ModelRunnerClass = HPUEmbeddingModelRunner
         else:
             ModelRunnerClass = HPUModelRunner
         self.model_runner: HPUModelRunner = ModelRunnerClass(
@@ -144,6 +147,13 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
     def load_model(self):
         self.model_runner.load_model()
+        if isinstance(self.model_runner, HPUEmbeddingModelRunner):
+            # recipes we will use the extra memory for graphs/blocks
+            free_hpu_memory = torch.hpu.mem_get_info()[0]
+            hpu_memory_margin = free_hpu_memory * (
+                1 - self.cache_config.gpu_memory_utilization)
+            self.model_runner.mem_margin = hpu_memory_margin
+            self._warm_up_model()
 
     @torch.inference_mode()
     def determine_num_available_blocks(self) -> Tuple[int, int]:
@@ -249,8 +259,11 @@ class HPUWorker(LocalOrDistributedWorkerBase):
     def _warm_up_model(self) -> None:
         # NOTE(kzawora): We should use virtual engine index here
         # for pipeline parallelism. Using 0 for now.
-        assert self.hpu_cache is not None
-        self.model_runner.warmup_model(self.hpu_cache[0])
+        if not isinstance(self.model_runner, HPUEmbeddingModelRunner):
+            assert self.hpu_cache is not None
+            self.model_runner.warmup_model(self.hpu_cache[0])
+        else:
+            self.model_runner.warmup_model(None)
         # Reset the seed to ensure that the random state is not affected by
         # the model initialization and profiling.
         set_random_seed(self.model_config.seed)

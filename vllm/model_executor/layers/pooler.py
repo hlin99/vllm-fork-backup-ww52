@@ -81,38 +81,57 @@ class Pooler(nn.Module):
     ) -> PoolerOutput:
         """Pools specific information from hidden states based on metadata."""
 
-        prompt_lens = PoolingTensors.from_pooling_metadata(
-            pooling_metadata, hidden_states.device).prompt_lens
-
+        pooling_tensors = PoolingTensors.from_pooling_metadata(
+            pooling_metadata, hidden_states.device)
+        prompt_lens, prompt_offsets = pooling_tensors.prompt_lens, pooling_tensors.prompt_offsets
+        
         if self.pooling_type is PoolingType.CLS:
-            first_token_flat_indices = torch.zeros_like(prompt_lens)
-            first_token_flat_indices[1:] += torch.cumsum(prompt_lens,
-                                                         dim=0)[:-1]
+            if prompt_offsets is not None:
+                first_token_flat_indices = prompt_offsets
+            else:
+                first_token_flat_indices = torch.zeros_like(prompt_lens)
+                first_token_flat_indices[1:] += torch.cumsum(prompt_lens,
+                                                            dim=0)[:-1]
             pooled_data = hidden_states[first_token_flat_indices]
         elif self.pooling_type == PoolingType.LAST:
-            last_token_flat_indices = torch.cumsum(prompt_lens, dim=0) - 1
+            if prompt_offsets is not None:
+                last_token_flat_indices = prompt_lens + prompt_offsets - 1
+            else:
+                last_token_flat_indices = torch.cumsum(prompt_lens, dim=0) - 1
             pooled_data = hidden_states[last_token_flat_indices]
         elif self.pooling_type == PoolingType.ALL:
-            offset = 0
             pooled_data_lst = []
-            for prompt_len in prompt_lens:
-                pooled_data_i = hidden_states[offset:offset + prompt_len]
+            if prompt_offsets is not None:
+                for prompt_len, prompt_offset in zip(prompt_lens,prompt_offsets):
+                    pooled_data_i = hidden_states[prompt_offset:prompt_offset + prompt_len]
+                    pooled_data_lst.append(pooled_data_i)
+            else:
+                offset = 0
+                for prompt_len in prompt_lens:
+                    pooled_data_i = hidden_states[offset:offset + prompt_len]
 
-                pooled_data_lst.append(pooled_data_i)
-                offset += prompt_len
+                    pooled_data_lst.append(pooled_data_i)
+                    offset += prompt_len
 
             pooled_data = torch.stack(pooled_data_lst)
         elif self.pooling_type == PoolingType.MEAN:
-            # Calculate mean pooling
-            cumsum = torch.cumsum(hidden_states, dim=0)
-            start_indices = torch.cat([
-                torch.tensor([0], device=hidden_states.device),
-                torch.cumsum(prompt_lens[:-1], dim=0)
-            ])
-            end_indices = torch.cumsum(prompt_lens, dim=0)
-            pooled_data = (
-                cumsum[end_indices - 1] - cumsum[start_indices] +
-                hidden_states[start_indices]) / prompt_lens.unsqueeze(1)
+            if prompt_offsets is not None:
+                pooled_data_lst = []
+                for prompt_len, prompt_offset in zip(prompt_lens,prompt_offsets):
+                    pooled_data_i = hidden_states[prompt_offset:prompt_offset + prompt_len]
+                    pooled_data_lst.append(torch.mean(pooled_data_i, 0))
+                pooled_data = torch.stack(pooled_data_lst)
+            else:
+                # Calculate mean pooling
+                cumsum = torch.cumsum(hidden_states, dim=0)
+                start_indices = torch.cat([
+                    torch.tensor([0], device=hidden_states.device),
+                    torch.cumsum(prompt_lens[:-1], dim=0)
+                ])
+                end_indices = torch.cumsum(prompt_lens, dim=0)
+                pooled_data = (
+                    cumsum[end_indices - 1] - cumsum[start_indices] +
+                    hidden_states[start_indices]) / prompt_lens.unsqueeze(1)
         elif self.pooling_type == PoolingType.STEP:
             returned_token_ids = self.returned_token_ids
             if returned_token_ids is not None and len(returned_token_ids) > 0:
@@ -120,17 +139,28 @@ class Pooler(nn.Module):
 
             step_tag_id = self.step_tag_id
 
-            offset = 0
-            pooled_data_lst = []
-            for prompt_len, seq_data_i in zip(
-                    prompt_lens, pooling_metadata.seq_data.values()):
-                pooled_data_i = hidden_states[offset:offset + prompt_len]
-                if step_tag_id is not None:
-                    token_ids = torch.tensor(seq_data_i.prompt_token_ids)
-                    pooled_data_i = pooled_data_i[token_ids == step_tag_id]
+            if prompt_offsets is not None:
+                pooled_data_lst = []
+                for prompt_len, prompt_offset, seq_data_i in zip(
+                        prompt_lens, prompt_offsets, pooling_metadata.seq_data.values()):
+                    pooled_data_i = hidden_states[prompt_offset:prompt_offset + prompt_len]
+                    if step_tag_id is not None:
+                        token_ids = torch.tensor(seq_data_i.prompt_token_ids)
+                        pooled_data_i = pooled_data_i[token_ids == step_tag_id]
 
-                offset += prompt_len
-                pooled_data_lst.append(pooled_data_i)
+                    pooled_data_lst.append(pooled_data_i)
+            else:
+                offset = 0
+                pooled_data_lst = []
+                for prompt_len, seq_data_i in zip(
+                        prompt_lens, pooling_metadata.seq_data.values()):
+                    pooled_data_i = hidden_states[offset:offset + prompt_len]
+                    if step_tag_id is not None:
+                        token_ids = torch.tensor(seq_data_i.prompt_token_ids)
+                        pooled_data_i = pooled_data_i[token_ids == step_tag_id]
+
+                    offset += prompt_len
+                    pooled_data_lst.append(pooled_data_i)
 
             pooled_data = torch.stack(pooled_data_lst)
         else:

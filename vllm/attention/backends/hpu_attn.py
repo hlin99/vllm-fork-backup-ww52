@@ -173,7 +173,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         Returns:
             shape = [num_tokens, num_heads * head_size]
         """
-        if attn_type != AttentionType.DECODER:
+        if attn_type != AttentionType.DECODER and attn_type != AttentionType.ENCODER_ONLY:
             raise NotImplementedError("Encoder self-attention and "
                                       "encoder/decoder cross-attention "
                                       "are not implemented for "
@@ -220,7 +220,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                             (1, self.num_kv_heads, 1, 1))
                         attn_bias.add_(position_bias)
                 else:
-                    attn_bias = None
+                    attn_bias = attn_metadata.attn_bias
 
                 out = ops.prompt_attention(
                     query.view(query_shape),
