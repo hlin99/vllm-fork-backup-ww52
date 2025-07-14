@@ -25,8 +25,8 @@ if has_arg debug "$@"; then
   DEBUG_MODE=1
 fi
 
-etcd --listen-client-urls http://0.0.0.0:2379 \
-     --advertise-client-urls http://localhost:2379 \
+etcd --listen-client-urls http://0.0.0.0:2311 \
+     --advertise-client-urls http://localhost:2311 \
      >etcd.log 2>&1 &
 
 if [ "$DEBUG_MODE" == "1" ]; then
