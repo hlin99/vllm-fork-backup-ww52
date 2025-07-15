@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 # Adapted from
 # https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/models/gpt2/modeling_gpt2.py
 # Copyright 2023 The vLLM team.
@@ -16,13 +19,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only GPT-2 model compatible with HuggingFace weights."""
-from typing import Iterable, List, Optional, Set, Tuple, Union
+from collections.abc import Iterable
+from typing import Optional, Union
 
 import torch
 from torch import nn
 from transformers import GPT2Config
 
-from vllm.attention import Attention, AttentionMetadata
+from vllm.attention import Attention
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, VllmConfig
 from vllm.distributed.parallel_state import (
@@ -33,7 +37,6 @@ from vllm.model_executor.layers.linear import (ColumnParallelLinear,
                                                RowParallelLinear)
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization import QuantizationConfig
-from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
@@ -41,7 +44,7 @@ from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import IntermediateTensors
 
 from .interfaces import SupportsPP
-from .utils import (is_pp_missing_parameter,
+from .utils import (AutoWeightsLoader, is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
 
@@ -90,12 +93,10 @@ class GPT2Attention(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        kv_cache: torch.Tensor,
-        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         qkv, _ = self.c_attn(hidden_states)
         q, k, v = qkv.chunk(chunks=3, dim=-1)
-        attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
+        attn_output = self.attn(q, k, v)
         attn_output, _ = self.c_proj(attn_output)
         return attn_output
 
@@ -162,16 +163,10 @@ class GPT2Block(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        kv_cache: torch.Tensor,
-        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         residual = hidden_states
         hidden_states = self.ln_1(hidden_states)
-        attn_output = self.attn(
-            hidden_states=hidden_states,
-            kv_cache=kv_cache,
-            attn_metadata=attn_metadata,
-        )
+        attn_output = self.attn(hidden_states=hidden_states)
         # residual connection
         hidden_states = attn_output + residual
 
@@ -198,7 +193,10 @@ class GPT2Model(nn.Module):
         assert not config.scale_attn_by_inverse_layer_idx
         assert not config.reorder_and_upcast_attn
         self.embed_dim = config.hidden_size
-        self.wte = VocabParallelEmbedding(config.vocab_size, self.embed_dim)
+        self.wte = VocabParallelEmbedding(config.vocab_size,
+                                          self.embed_dim,
+                                          quant_config=quant_config,
+                                          prefix=f"{prefix}.wte")
         self.wpe = nn.Embedding(config.max_position_embeddings, self.embed_dim)
         self.start_layer, self.end_layer, self.h = make_layers(
             config.num_hidden_layers,
@@ -217,8 +215,6 @@ class GPT2Model(nn.Module):
         self,
         input_ids: torch.Tensor,
         position_ids: torch.Tensor,
-        kv_caches: List[torch.Tensor],
-        attn_metadata: AttentionMetadata,
         intermediate_tensors: Optional[IntermediateTensors],
         inputs_embeds: Optional[torch.Tensor],
     ) -> Union[torch.Tensor, IntermediateTensors]:
@@ -231,11 +227,8 @@ class GPT2Model(nn.Module):
             assert intermediate_tensors is not None
             hidden_states = intermediate_tensors["hidden_states"]
 
-        for i in range(self.start_layer, self.end_layer):
-            layer = self.h[i]
-            hidden_states = layer(hidden_states,
-                                  kv_caches[i - self.start_layer],
-                                  attn_metadata)
+        for layer in self.h[self.start_layer:self.end_layer]:
+            hidden_states = layer(hidden_states)
 
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({"hidden_states": hidden_states})
@@ -243,77 +236,15 @@ class GPT2Model(nn.Module):
         hidden_states = self.ln_f(hidden_states)
         return hidden_states
 
-
-class GPT2LMHeadModel(nn.Module, SupportsPP):
-
-    def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
-        super().__init__()
-        config = vllm_config.model_config.hf_config
-        quant_config = vllm_config.quant_config
-        self.config = config
-        self.quant_config = quant_config
-        self.transformer = GPT2Model(vllm_config=vllm_config,
-                                     prefix=maybe_prefix(
-                                         prefix, "transformer"))
-        if self.config.tie_word_embeddings:
-            self.lm_head = self.transformer.wte
-        else:
-            self.lm_head = ParallelLMHead(self.config.vocab_size,
-                                          self.config.hidden_size)
-        self.logits_processor = LogitsProcessor(config.vocab_size)
-        self.sampler = get_sampler()
-        self.make_empty_intermediate_tensors = (
-            self.transformer.make_empty_intermediate_tensors)
-
-    def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
-        return self.transformer.get_input_embeddings(input_ids)
-
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        positions: torch.Tensor,
-        kv_caches: List[torch.Tensor],
-        attn_metadata: AttentionMetadata,
-        intermediate_tensors: Optional[IntermediateTensors] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, IntermediateTensors]:
-        hidden_states = self.transformer(input_ids, positions, kv_caches,
-                                         attn_metadata, intermediate_tensors,
-                                         inputs_embeds)
-        return hidden_states
-
-    def compute_logits(
-        self,
-        hidden_states: torch.Tensor,
-        sampling_metadata: SamplingMetadata,
-    ) -> Optional[torch.Tensor]:
-        logits = self.logits_processor(self.lm_head, hidden_states,
-                                       sampling_metadata)
-        return logits
-
-    def sample(
-        self,
-        logits: torch.Tensor,
-        sampling_metadata: SamplingMetadata,
-    ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(logits, sampling_metadata)
-        return next_tokens
-
-    def load_weights(self, weights: Iterable[Tuple[str,
-                                                   torch.Tensor]]) -> Set[str]:
+    def load_weights(self, weights: Iterable[tuple[str,
+                                                   torch.Tensor]]) -> set[str]:
         params_dict = dict(self.named_parameters(remove_duplicate=False))
-        loaded_params: Set[str] = set()
+        loaded_params: set[str] = set()
         for name, loaded_weight in weights:
-            if "lm_head.weight" in name:
-                # GPT-2 ties the weights of the embedding layer and the final
-                # linear layer.
-                continue
             if ".attn.bias" in name or ".attn.masked_bias" in name:
                 # Skip attention mask.
                 # NOTE: "c_attn.bias" should not be skipped.
                 continue
-            if not name.startswith("transformer."):
-                name = "transformer." + name
 
             if is_pp_missing_parameter(name, self):
                 continue
@@ -333,3 +264,65 @@ class GPT2LMHeadModel(nn.Module, SupportsPP):
             weight_loader(param, loaded_weight)
             loaded_params.add(name)
         return loaded_params
+
+
+class GPT2LMHeadModel(nn.Module, SupportsPP):
+
+    def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
+        super().__init__()
+        config = vllm_config.model_config.hf_config
+        quant_config = vllm_config.quant_config
+        self.config = config
+        self.quant_config = quant_config
+        self.transformer = GPT2Model(vllm_config=vllm_config,
+                                     prefix=maybe_prefix(
+                                         prefix, "transformer"))
+        self.lm_head = ParallelLMHead(self.config.vocab_size,
+                                      self.config.hidden_size,
+                                      quant_config=quant_config,
+                                      prefix=f"{prefix}.lm_head")
+        if self.config.tie_word_embeddings:
+            self.lm_head = self.lm_head.tie_weights(self.transformer.wte)
+
+        self.logits_processor = LogitsProcessor(config.vocab_size)
+        self.make_empty_intermediate_tensors = (
+            self.transformer.make_empty_intermediate_tensors)
+
+    def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
+        return self.transformer.get_input_embeddings(input_ids)
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        intermediate_tensors: Optional[IntermediateTensors] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
+    ) -> Union[torch.Tensor, IntermediateTensors]:
+        hidden_states = self.transformer(input_ids, positions,
+                                         intermediate_tensors, inputs_embeds)
+        return hidden_states
+
+    def compute_logits(
+        self,
+        hidden_states: torch.Tensor,
+        sampling_metadata: SamplingMetadata,
+    ) -> Optional[torch.Tensor]:
+        logits = self.logits_processor(self.lm_head, hidden_states,
+                                       sampling_metadata)
+        return logits
+
+    def load_weights(self, weights: Iterable[tuple[str,
+                                                   torch.Tensor]]) -> set[str]:
+        loader = AutoWeightsLoader(self)
+        weights = _add_transformer_prefix(weights)
+        return loader.load_weights(weights)
+
+
+def _add_transformer_prefix(
+    weights: Iterable[tuple[str, torch.Tensor]]
+) -> Iterable[tuple[str, torch.Tensor]]:
+    for name, tensor in weights:
+        if not name.startswith('transformer.') and not name.startswith(
+                "lm_head"):
+            name = 'transformer.' + name
+        yield name, tensor

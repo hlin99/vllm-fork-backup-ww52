@@ -1,5 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -10,6 +14,7 @@ from vllm.distributed import (divide, get_tensor_model_parallel_rank,
                               tensor_model_parallel_all_reduce)
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase, method_has_implemented_embedding)
+from vllm.model_executor.layers.utils import dispatch_unquantized_gemm
 from vllm.model_executor.parameter import BasevLLMParameter
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
@@ -22,7 +27,7 @@ class UnquantizedEmbeddingMethod(QuantizeMethodBase):
 
     def create_weights(self, layer: torch.nn.Module,
                        input_size_per_partition: int,
-                       output_partition_sizes: List[int], input_size: int,
+                       output_partition_sizes: list[int], input_size: int,
                        output_size: int, params_dtype: torch.dtype,
                        **extra_weight_attrs):
         """Create weights for embedding layer."""
@@ -38,7 +43,7 @@ class UnquantizedEmbeddingMethod(QuantizeMethodBase):
               layer: torch.nn.Module,
               x: torch.Tensor,
               bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-        return F.linear(x, layer.weight, bias)
+        return dispatch_unquantized_gemm()(x, layer.weight, bias)
 
     def embedding(self, layer: torch.nn.Module,
                   input_: torch.Tensor) -> torch.Tensor:
@@ -115,17 +120,17 @@ class VocabParallelEmbeddingShardIndices:
 
     def __post_init__(self):
         # sanity checks
-        assert (self.padded_org_vocab_start_index <=
-                self.padded_org_vocab_end_index)
-        assert (self.padded_added_vocab_start_index <=
-                self.padded_added_vocab_end_index)
+        assert (self.padded_org_vocab_start_index
+                <= self.padded_org_vocab_end_index)
+        assert (self.padded_added_vocab_start_index
+                <= self.padded_added_vocab_end_index)
 
         assert self.org_vocab_start_index <= self.org_vocab_end_index
         assert self.added_vocab_start_index <= self.added_vocab_end_index
 
         assert self.org_vocab_start_index <= self.padded_org_vocab_start_index
-        assert (self.added_vocab_start_index <=
-                self.padded_added_vocab_start_index)
+        assert (self.added_vocab_start_index
+                <= self.padded_added_vocab_start_index)
         assert self.org_vocab_end_index <= self.padded_org_vocab_end_index
         assert self.added_vocab_end_index <= self.padded_added_vocab_end_index
 
@@ -133,16 +138,16 @@ class VocabParallelEmbeddingShardIndices:
         assert self.num_added_elements <= self.num_added_elements_padded
 
 
-@torch.compile(dynamic=True)
+@torch.compile(dynamic=True, backend=current_platform.simple_compile_backend)
 def get_masked_input_and_mask(
         input_: torch.Tensor, org_vocab_start_index: int,
         org_vocab_end_index: int, num_org_vocab_padding: int,
         added_vocab_start_index: int,
-        added_vocab_end_index: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        added_vocab_end_index: int) -> tuple[torch.Tensor, torch.Tensor]:
     # torch.compile will fuse all of the pointwise ops below
     # into a single kernel, making it very fast
-    org_vocab_mask = (input_ >= org_vocab_start_index) & (input_ <
-                                                          org_vocab_end_index)
+    org_vocab_mask = (input_ >= org_vocab_start_index) & (
+        input_ < org_vocab_end_index)
     added_vocab_mask = (input_ >= added_vocab_start_index) & (
         input_ < added_vocab_end_index)
     added_offset = added_vocab_start_index - (
@@ -224,24 +229,24 @@ class VocabParallelEmbedding(torch.nn.Module):
                                                self.tp_size)
         self.embedding_dim = embedding_dim
 
-        linear_method = None
+        quant_method = None
         if quant_config is not None:
-            linear_method = quant_config.get_quant_method(self, prefix=prefix)
-        if linear_method is None:
-            linear_method = UnquantizedEmbeddingMethod()
+            quant_method = quant_config.get_quant_method(self, prefix=prefix)
+        if quant_method is None:
+            quant_method = UnquantizedEmbeddingMethod()
 
         # If we are making an embedding layer, then our quantization linear
         # method must implement the embedding operation. If we are another
         # layer type like ParallelLMHead, this is not important.
-        is_embedding_layer = type(self.__class__) is VocabParallelEmbedding
-        linear_method_implements_embedding = method_has_implemented_embedding(
-            type(linear_method))
-        if is_embedding_layer and not linear_method_implements_embedding:
+        is_embedding_layer = type(self) is VocabParallelEmbedding
+        quant_method_implements_embedding = method_has_implemented_embedding(
+            type(quant_method))
+        if is_embedding_layer and not quant_method_implements_embedding:
             raise NotImplementedError(
-                f"The class {type(linear_method).__name__} must implement "
+                f"The class {type(quant_method).__name__} must implement "
                 "the 'embedding' method, see UnquantizedEmbeddingMethod.")
 
-        self.linear_method: QuantizeMethodBase = linear_method
+        self.quant_method: QuantizeMethodBase = quant_method
 
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
@@ -258,13 +263,13 @@ class VocabParallelEmbedding(torch.nn.Module):
             self.shard_indices.added_vocab_end_index -
             self.shard_indices.added_vocab_start_index)
 
-        self.linear_method.create_weights(self,
-                                          self.embedding_dim,
-                                          [self.num_embeddings_per_partition],
-                                          self.embedding_dim,
-                                          self.num_embeddings_padded,
-                                          params_dtype=params_dtype,
-                                          weight_loader=self.weight_loader)
+        self.quant_method.create_weights(self,
+                                         self.embedding_dim,
+                                         [self.num_embeddings_per_partition],
+                                         self.embedding_dim,
+                                         self.num_embeddings_padded,
+                                         params_dtype=params_dtype,
+                                         weight_loader=self.weight_loader)
 
     @classmethod
     def _get_indices(cls, vocab_size_padded: int, org_vocab_size_padded: int,
@@ -295,7 +300,7 @@ class VocabParallelEmbedding(torch.nn.Module):
             org_vocab_start_index, org_vocab_end_index,
             added_vocab_start_index, added_vocab_end_index)
 
-    def get_sharded_to_full_mapping(self) -> Optional[List[int]]:
+    def get_sharded_to_full_mapping(self) -> Optional[list[int]]:
         """Get a mapping that can be used to reindex the gathered
         logits for sampling.
         
@@ -309,9 +314,9 @@ class VocabParallelEmbedding(torch.nn.Module):
         if self.tp_size < 2:
             return None
 
-        base_embeddings: List[int] = []
-        added_embeddings: List[int] = []
-        padding: List[int] = []
+        base_embeddings: list[int] = []
+        added_embeddings: list[int] = []
+        padding: list[int] = []
         for tp_rank in range(self.tp_size):
             shard_indices = self._get_indices(self.num_embeddings_padded,
                                               self.org_vocab_size_padded,
@@ -355,7 +360,7 @@ class VocabParallelEmbedding(torch.nn.Module):
         elif isinstance(param, UninitializedParameter):
             shape = list(loaded_weight.shape)
             if output_dim is not None:
-                shape[output_dim] = shape[output_dim] // self.tp_size
+                shape[output_dim] = self.num_embeddings_per_partition
             param.materialize(tuple(shape), dtype=loaded_weight.dtype)
 
         # If parameter does not have output dim, then it should
@@ -381,18 +386,21 @@ class VocabParallelEmbedding(torch.nn.Module):
         else:
             assert loaded_weight.shape[output_dim] == self.org_vocab_size
 
-        # Copy the data.
+        # Copy the data. Select chunk corresponding to current shard.
         loaded_weight = loaded_weight.narrow(output_dim, start_idx, shard_size)
 
         if current_platform.is_hpu():
             # FIXME(kzawora): Weight copy with slicing bugs out on Gaudi here,
             # so we're using a workaround. Remove this when fixed in
             # HPU PT bridge.
-            padded_weight = torch.cat([
-                loaded_weight,
-                torch.zeros(param.shape[0] - loaded_weight.shape[0],
-                            *loaded_weight.shape[1:])
-            ])
+            if param.shape[0] > loaded_weight.shape[0]:
+                padded_weight = torch.cat([
+                    loaded_weight,
+                    torch.zeros(param.shape[0] - loaded_weight.shape[0],
+                                *loaded_weight.shape[1:])
+                ])
+            else:
+                padded_weight = loaded_weight
             param.data.copy_(padded_weight)
         else:
             param[:loaded_weight.shape[0]].data.copy_(loaded_weight)
@@ -410,8 +418,8 @@ class VocabParallelEmbedding(torch.nn.Module):
         else:
             masked_input = input_
         # Get the embeddings.
-        output_parallel = self.linear_method.embedding(self,
-                                                       masked_input.long())
+        output_parallel = self.quant_method.embedding(self,
+                                                      masked_input.long())
         # Mask the output embedding.
         if self.tp_size > 1:
             output_parallel.masked_fill_(input_mask.unsqueeze(-1), 0)

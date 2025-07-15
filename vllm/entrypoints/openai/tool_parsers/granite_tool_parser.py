@@ -1,9 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 import json
-from typing import Dict, Sequence, Union
+from collections.abc import Sequence
+from typing import Union
 
 import partial_json_parser
 from partial_json_parser.core.options import Allow
 
+from vllm.entrypoints.chat_utils import random_tool_call_id
 from vllm.entrypoints.openai.protocol import (ChatCompletionRequest,
                                               DeltaFunctionCall, DeltaMessage,
                                               DeltaToolCall,
@@ -17,7 +22,6 @@ from vllm.entrypoints.openai.tool_parsers.utils import (consume_space,
                                                         partial_json_loads)
 from vllm.logger import init_logger
 from vllm.transformers_utils.tokenizer import AnyTokenizer
-from vllm.utils import random_uuid
 
 logger = init_logger(__name__)
 
@@ -35,11 +39,18 @@ class GraniteToolParser(ToolParser):
 
     def __init__(self, tokenizer: AnyTokenizer):
         super().__init__(tokenizer)
+        # for granite 3.0, the token `<|tool_call|>`
+        self.bot_token = "<|tool_call|>"
+        # for granite 3.1, the string `<tool_call>`
+        self.bot_string = "<tool_call>"
 
     def extract_tool_calls(
             self, model_output: str,
             request: ChatCompletionRequest) -> ExtractedToolCallInformation:
-        stripped = model_output.strip()
+        stripped = model_output.strip()\
+                    .removeprefix(self.bot_token)\
+                    .removeprefix(self.bot_string)\
+                    .lstrip()
         if not stripped or stripped[0] != '[':
             return ExtractedToolCallInformation(tools_called=False,
                                                 tool_calls=[],
@@ -57,7 +68,8 @@ class GraniteToolParser(ToolParser):
                     function=FunctionCall(
                         name=function_call["name"],
                         # function call args are JSON but as a string
-                        arguments=json.dumps(function_call["arguments"]),
+                        arguments=json.dumps(function_call["arguments"],
+                                             ensure_ascii=False),
                     ),
                 ) for function_call in raw_function_calls
             ]
@@ -86,7 +98,14 @@ class GraniteToolParser(ToolParser):
     ) -> Union[DeltaMessage, None]:
 
         start_idx = consume_space(0, current_text)
-        if not current_text or current_text[start_idx] != '[':
+        if current_text[start_idx:].startswith(self.bot_token):
+            start_idx = consume_space(start_idx + len(self.bot_token),
+                                      current_text)
+        if current_text[start_idx:].startswith(self.bot_string):
+            start_idx = consume_space(start_idx + len(self.bot_string),
+                                      current_text)
+        if not current_text or start_idx >= len(current_text)\
+            or current_text[start_idx] != '[':
             return DeltaMessage(content=delta_text)
 
         # bit mask flags for partial JSON parsing. If the name hasn't been
@@ -120,7 +139,7 @@ class GraniteToolParser(ToolParser):
                 return None
 
             # select as the current tool call the one we're on the state at
-            current_tool_call: Dict = tool_call_arr[self.current_tool_id]
+            current_tool_call: dict = tool_call_arr[self.current_tool_id]
 
             delta = None
             # case: we are starting a new tool in the array
@@ -134,7 +153,8 @@ class GraniteToolParser(ToolParser):
                 if self.current_tool_id >= 0:
                     cur_arguments = current_tool_call.get("arguments")
                     if cur_arguments:
-                        cur_args_json = json.dumps(cur_arguments)
+                        cur_args_json = json.dumps(cur_arguments,
+                                                   ensure_ascii=False)
                         sent = len(
                             self.streamed_args_for_tool[self.current_tool_id])
                         argument_diff = cur_args_json[sent:]
@@ -165,7 +185,7 @@ class GraniteToolParser(ToolParser):
                     delta = DeltaMessage(tool_calls=[
                         DeltaToolCall(index=self.current_tool_id,
                                       type="function",
-                                      id=f"chatcmpl-tool-{random_uuid()}",
+                                      id=random_tool_call_id(),
                                       function=DeltaFunctionCall(
                                           name=function_name).model_dump(
                                               exclude_none=True))
@@ -180,7 +200,8 @@ class GraniteToolParser(ToolParser):
                 if cur_arguments:
                     sent = len(
                         self.streamed_args_for_tool[self.current_tool_id])
-                    cur_args_json = json.dumps(cur_arguments)
+                    cur_args_json = json.dumps(cur_arguments,
+                                               ensure_ascii=False)
                     prev_arguments = self.prev_tool_call_arr[
                         self.current_tool_id].get("arguments")
 
@@ -188,7 +209,8 @@ class GraniteToolParser(ToolParser):
                     if is_complete[self.current_tool_id]:
                         argument_diff = cur_args_json[sent:]
                     elif prev_arguments:
-                        prev_args_json = json.dumps(prev_arguments)
+                        prev_args_json = json.dumps(prev_arguments,
+                                                    ensure_ascii=False)
                         if cur_args_json != prev_args_json:
                             prefix = find_common_prefix(
                                 prev_args_json, cur_args_json)

@@ -1,21 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """
 Simple KV Cache Connector for Distributed Machine Learning Inference
 
-The SimpleConnector transfers KV caches between prefill vLLM worker (KV cache 
-producer) and decode vLLM worker (KV cache consumer) using PyNcclPipe.
+The SimpleConnector transfers KV caches between prefill vLLM worker (KV cache
+producer) and decode vLLM worker (KV cache consumer) using PyNcclPipe or
+MooncakePipe.
 
 But the logic can be extended to support other pipe and lookup buffer.
 """
-from typing import TYPE_CHECKING, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 import torch
 
-from vllm import _custom_ops as ops
 from vllm.config import VllmConfig
 from vllm.distributed.kv_transfer.kv_connector.base import KVConnectorBase
+from vllm.distributed.kv_transfer.kv_connector.utils import (
+    model_aware_kv_ops_helper as kv_helper)
 from vllm.distributed.kv_transfer.kv_lookup_buffer.simple_buffer import (
     SimpleBuffer)
-from vllm.distributed.kv_transfer.kv_pipe.pynccl_pipe import PyNcclPipe
 from vllm.logger import init_logger
 from vllm.sequence import IntermediateTensors
 
@@ -35,14 +38,40 @@ class SimpleConnector(KVConnectorBase):
     ):
 
         self.config = config.kv_transfer_config
+        self.kv_helper = kv_helper(config)
 
-        logger.info("Initializing PyNcclConfig under kv_transfer_config %s",
+        if self.config.kv_connector == "PyNcclConnector":
+            from vllm.distributed.kv_transfer.kv_pipe.pynccl_pipe import (
+                PyNcclPipe)
+            logger.info(
+                "Initializing PyNcclConfig under kv_transfer_config %s",
+                self.config)
+        elif self.config.kv_connector == "MooncakeConnector":
+            # Check if MOONCAKE_CONFIG_PATH is set
+            import os
+            use_mooncake_distributed_pipe = os.getenv(
+                'MOONCAKE_CONFIG_PATH') is not None
+
+            if not use_mooncake_distributed_pipe:
+                raise ValueError(
+                    "To use MooncakeConnector, you need to pass the ENV: "
+                    "'MOONCAKE_CONFIG_PATH=/path/to/mooncake_config.json'.")
+            else:
+                from vllm.distributed.kv_transfer.kv_pipe.mooncake_pipe import (  # noqa: E501
+                    MooncakePipe)
+                logger.info(
+                    "Initializing MooncakeConfig under kv_transfer_config %s",
                     self.config)
 
         self.lookup_buffer_size = self.config.kv_buffer_size
 
         self.producer_buffer: Optional[SimpleBuffer] = None
         self.consumer_buffer: Optional[SimpleBuffer] = None
+
+        self.producer_data_pipe: Union[PyNcclPipe, MooncakePipe]
+        self.consumer_data_pipe: Union[PyNcclPipe, MooncakePipe]
+        self.producer_signal_pipe: Union[PyNcclPipe, MooncakePipe]
+        self.consumer_signal_pipe: Union[PyNcclPipe, MooncakePipe]
 
         # 2 pipes for every rank in the world
         port_offset_base = 2 * rank
@@ -51,17 +80,26 @@ class SimpleConnector(KVConnectorBase):
         # and the decode vLLM only uses recv pipe
         if self.config.is_kv_producer:
 
-            self.producer_data_pipe = PyNcclPipe(
-                local_rank=local_rank,
-                config=self.config,
-                port_offset=port_offset_base,
-            )
-            self.producer_signal_pipe = PyNcclPipe(
-                local_rank=local_rank,
-                config=self.config,
-                port_offset=port_offset_base + 1,
-                device="cpu",
-            )
+            if self.config.kv_connector == "PyNcclConnector":
+                self.producer_data_pipe = PyNcclPipe(
+                    local_rank=local_rank,
+                    config=self.config,
+                    port_offset=port_offset_base,
+                )
+                self.producer_signal_pipe = PyNcclPipe(
+                    local_rank=local_rank,
+                    config=self.config,
+                    port_offset=port_offset_base + 1,
+                    device="cpu",
+                )
+            elif self.config.kv_connector == "MooncakeConnector":
+                self.producer_data_pipe = MooncakePipe(
+                    local_rank=local_rank,
+                    config=self.config,
+                )
+                # We only need to initialize MooncakePipe once
+                self.producer_signal_pipe = self.producer_data_pipe
+
             self.producer_buffer = SimpleBuffer(self.producer_signal_pipe,
                                                 self.producer_data_pipe,
                                                 self.config.kv_buffer_size)
@@ -69,18 +107,26 @@ class SimpleConnector(KVConnectorBase):
         else:
 
             # the current vLLM instance is KV consumer, so it needs to connect
-            # its recv pipe to the send pipe of KV producder
-            self.consumer_data_pipe = PyNcclPipe(
-                local_rank=local_rank,
-                config=self.config,
-                port_offset=port_offset_base,
-            )
-            self.consumer_signal_pipe = PyNcclPipe(
-                local_rank=local_rank,
-                config=self.config,
-                port_offset=port_offset_base + 1,
-                device="cpu",
-            )
+            # its recv pipe to the send pipe of KV producer
+            if self.config.kv_connector == "PyNcclConnector":
+                self.consumer_data_pipe = PyNcclPipe(
+                    local_rank=local_rank,
+                    config=self.config,
+                    port_offset=port_offset_base,
+                )
+                self.consumer_signal_pipe = PyNcclPipe(
+                    local_rank=local_rank,
+                    config=self.config,
+                    port_offset=port_offset_base + 1,
+                    device="cpu",
+                )
+            elif self.config.kv_connector == "MooncakeConnector":
+                self.consumer_data_pipe = MooncakePipe(
+                    local_rank=local_rank,
+                    config=self.config,
+                )
+                self.consumer_signal_pipe = self.consumer_data_pipe
+
             self.consumer_buffer = SimpleBuffer(
                 self.consumer_signal_pipe,
                 self.consumer_data_pipe,
@@ -88,7 +134,7 @@ class SimpleConnector(KVConnectorBase):
             )
 
     def select(self, input_tokens: Optional[torch.Tensor],
-               roi: Optional[torch.Tensor]) -> List[Optional[torch.Tensor]]:
+               roi: Optional[torch.Tensor]) -> list[Optional[torch.Tensor]]:
 
         assert self.consumer_buffer is not None, "Please initialize the "\
             "consumer buffer before calling select."
@@ -107,7 +153,7 @@ class SimpleConnector(KVConnectorBase):
         self,
         model_executable: torch.nn.Module,
         model_input: "ModelInputForGPUWithSamplingMetadata",
-        kv_caches: List[torch.Tensor],
+        kv_caches: list[torch.Tensor],
         hidden_or_intermediate_states: Union[torch.Tensor,
                                              IntermediateTensors],
     ) -> None:
@@ -115,8 +161,10 @@ class SimpleConnector(KVConnectorBase):
         input_tokens_tensor = model_input.input_tokens
         seq_lens = model_input.attn_metadata.seq_lens
         slot_mapping_flat = model_input.attn_metadata.slot_mapping.flatten()
+        num_prefill_tokens = model_input.attn_metadata.num_prefill_tokens
         start_layer = model_executable.model.start_layer
         end_layer = model_executable.model.end_layer
+        num_heads, head_size = self.kv_helper.get_model_args(model_executable)
 
         # query_lens contains new KV caches that are added to vLLM.
         # so we will send them to decode instance
@@ -124,17 +172,23 @@ class SimpleConnector(KVConnectorBase):
         for idx, slen in enumerate(seq_lens):
             start_pos = sum(seq_lens[:idx])
             end_pos = start_pos + slen
+
+            if start_pos >= num_prefill_tokens:
+                # vllm/worker/model_runner.py::_prepare_model_input_tensors:
+                # - input_tokens[:num_prefill_tokens] contains prefill tokens.
+                # - input_tokens[num_prefill_tokens:] contains decode tokens.
+                logger.warning("You have some decode requests while using "
+                               "SimpleConnector. Their KVCache won't be sent.")
+                break
+
             current_tokens = input_tokens_tensor[start_pos:end_pos]
 
             keys, values = [], []
 
             for layer_id in range(start_layer, end_layer):
                 kv_cache = kv_caches[layer_id - start_layer]
-
-                _, _, num_heads, head_size = kv_cache[0].shape
-
-                key_cache = kv_cache[0].reshape(-1, num_heads, head_size)
-                value_cache = kv_cache[1].reshape(-1, num_heads, head_size)
+                key_cache, value_cache = self.kv_helper.get_kv_from_cache(
+                    kv_cache, num_heads, head_size)
 
                 current_slot_mapping = slot_mapping_flat[start_pos:end_pos]
 
@@ -154,8 +208,8 @@ class SimpleConnector(KVConnectorBase):
     def recv_kv_caches_and_hidden_states(
         self, model_executable: torch.nn.Module,
         model_input: "ModelInputForGPUWithSamplingMetadata",
-        kv_caches: List[torch.Tensor]
-    ) -> Tuple[Union[torch.Tensor, IntermediateTensors], bool,
+        kv_caches: list[torch.Tensor]
+    ) -> tuple[Union[torch.Tensor, IntermediateTensors], bool,
                "ModelInputForGPUWithSamplingMetadata"]:
 
         # When bypass_model_exec is set to False, it means that at least for one
@@ -166,7 +220,10 @@ class SimpleConnector(KVConnectorBase):
 
         input_tokens_tensor = model_input.input_tokens
         seq_lens = model_input.attn_metadata.seq_lens
+        num_prefill_tokens = model_input.attn_metadata.num_prefill_tokens
         slot_mapping = model_input.attn_metadata.slot_mapping.flatten()
+        start_layer = model_executable.model.start_layer
+        end_layer = model_executable.model.end_layer
 
         hidden_or_intermediate_states_for_one_req = []
 
@@ -177,9 +234,21 @@ class SimpleConnector(KVConnectorBase):
         # enumerate different requests
         # FIXME(Kuntai): This impl assumes that all requests are prefill.
         for idx, slen in enumerate(seq_lens):
-
             start_pos = sum(seq_lens[:idx])
             end_pos = start_pos + slen
+
+            if start_pos >= num_prefill_tokens:
+                # This can happen during inflight batching. See:
+                # vllm/worker/model_runner.py::_prepare_model_input_tensors:
+                # - input_tokens[:num_prefill_tokens] contains prefill tokens.
+                # - input_tokens[num_prefill_tokens:] contains decode tokens.
+                logger.warning("You should set --enable_chunked_prefill=False "
+                               "and --max_num_batched_tokens "
+                               "should be equal to --max_seq_len_to_capture")
+                bypass_model_exec = False
+                assert start_pos == num_prefill_tokens
+                break
+
             current_tokens = input_tokens_tensor[start_pos:end_pos]
             num_tokens = slen
 
@@ -213,25 +282,19 @@ class SimpleConnector(KVConnectorBase):
             end_pos = start_pos + num_computed_tokens
 
             # put received KV caches into paged memory
-            for i in range(model_executable.model.start_layer,
-                           model_executable.model.end_layer):
+            for cur_layer in range(start_layer, end_layer):
 
-                kv_cache = kv_caches[i - model_executable.model.start_layer]
-                layer = model_executable.model.layers[i]
+                layer_id = cur_layer - start_layer
+                kv_cache = kv_caches[layer_id]
+                layer = model_executable.model.layers[cur_layer]
 
-                key_cache, value_cache = kv_cache[0], kv_cache[1]
-                ops.reshape_and_cache_flash(
-                    keys[i - model_executable.model.start_layer].to(
-                        key_cache.device),
-                    values[i - model_executable.model.start_layer].to(
-                        value_cache.device),
-                    key_cache,
-                    value_cache,
-                    slot_mapping[start_pos:end_pos],
-                    layer.self_attn.attn.kv_cache_dtype,
-                    layer.self_attn.attn._k_scale,
-                    layer.self_attn.attn._v_scale,
-                )
+                # get remote kvcache
+                remote_k, remote_v = keys[layer_id], values[layer_id]
+
+                self.kv_helper.put_kv_to_cache(model_executable, remote_k,
+                                               remote_v, layer, kv_cache,
+                                               slot_mapping, start_pos,
+                                               end_pos)
 
             hidden_or_intermediate_states_for_one_req.append(hidden)
 
@@ -240,7 +303,7 @@ class SimpleConnector(KVConnectorBase):
             # Here we will fall back to normal model forwarding
             # But optionally you can adjust model_input so that you only do
             # prefilling on those tokens that are missing KV caches.
-            logger.debug(
+            logger.warning(
                 "[rank%d]: Failed to receive all KVs and hidden "
                 "states, redo model forwarding.", torch.distributed.get_rank())
             hidden_or_intermediate_states = None
@@ -256,6 +319,11 @@ class SimpleConnector(KVConnectorBase):
 
     def close(self):
         self.producer_data_pipe.close()
-        self.producer_signal_pipe.close()
         self.consumer_data_pipe.close()
-        self.consumer_signal_pipe.close()
+        if self.config.kv_connector == "PyNcclConnector":
+            self.producer_signal_pipe.close()
+            self.consumer_signal_pipe.close()
+        elif self.config.kv_connector == "MooncakeConnector":
+            # MooncakePipe reuses data_pipe for signal_pipe, so we only have to
+            # close the data_pipe.
+            pass

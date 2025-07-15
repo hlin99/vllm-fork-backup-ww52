@@ -1,11 +1,11 @@
-from typing import Dict, Type
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import torch.nn as nn
 
 from vllm.config import get_current_vllm_config
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
-from vllm.utils import print_warning_once
 
 logger = init_logger(__name__)
 
@@ -58,6 +58,16 @@ class CustomOp(nn.Module):
         # PyTorch-native implementation.
         return self.forward_native(*args, **kwargs)
 
+    def forward_neuron(self, *args, **kwargs):
+        # By default, we assume that Neuron ops are compatible with the
+        # PyTorch-native implementation.
+        return self.forward_native(*args, **kwargs)
+
+    def forward_oot(self, *args, **kwargs):
+        # By default, we assume that OOT ops are compatible with the
+        # PyTorch-native implementation.
+        return self.forward_native(*args, **kwargs)
+
     def dispatch_forward(self):
         # NOTE(woosuk): Here we assume that vLLM was built for only one
         # specific backend. Currently, we do not support dynamic dispatching.
@@ -82,6 +92,10 @@ class CustomOp(nn.Module):
             return self.forward_tpu
         elif current_platform.is_xpu():
             return self.forward_xpu
+        elif current_platform.is_neuron():
+            return self.forward_neuron
+        elif current_platform.is_out_of_tree():
+            return self.forward_oot
         else:
             return self.forward_cuda
 
@@ -91,10 +105,10 @@ class CustomOp(nn.Module):
         compilation_config = get_current_vllm_config().compilation_config
         custom_ops = compilation_config.custom_ops
         if not hasattr(cls, "name"):
-            print_warning_once(
-                f"Custom op {cls.__name__} was not registered, "
-                f"which means it won't appear in the op registry. "
-                f"It will be enabled/disabled based on the global settings.")
+            logger.warning_once(
+                "Custom op %s was not registered, which means it won't appear in the op registry. It will be enabled/disabled based on the global settings.",  # noqa: E501
+                cls.__name__,
+            )
             return CustomOp.default_on()
 
         enabled = f"+{cls.name}" in custom_ops
@@ -123,7 +137,7 @@ class CustomOp(nn.Module):
     # Examples:
     # - MyOp.enabled()
     # - op_registry["my_op"].enabled()
-    op_registry: Dict[str, Type['CustomOp']] = {}
+    op_registry: dict[str, type['CustomOp']] = {}
 
     # Decorator to register custom ops.
     @classmethod

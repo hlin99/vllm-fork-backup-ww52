@@ -1,5 +1,9 @@
-from typing import Final, List, Optional, Union
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+from typing import Final, Optional, Union
+
+import jinja2
 from fastapi import Request
 
 from vllm.config import ModelConfig
@@ -15,9 +19,8 @@ from vllm.entrypoints.openai.protocol import (DetokenizeRequest,
                                               TokenizeRequest,
                                               TokenizeResponse)
 # yapf: enable
-from vllm.entrypoints.openai.serving_engine import (BaseModelPath,
-                                                    LoRAModulePath,
-                                                    OpenAIServing)
+from vllm.entrypoints.openai.serving_engine import OpenAIServing
+from vllm.entrypoints.openai.serving_models import OpenAIServingModels
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
@@ -29,18 +32,15 @@ class OpenAIServingTokenization(OpenAIServing):
         self,
         engine_client: EngineClient,
         model_config: ModelConfig,
-        base_model_paths: List[BaseModelPath],
+        models: OpenAIServingModels,
         *,
-        lora_modules: Optional[List[LoRAModulePath]],
         request_logger: Optional[RequestLogger],
         chat_template: Optional[str],
         chat_template_content_format: ChatTemplateContentFormatOption,
     ) -> None:
         super().__init__(engine_client=engine_client,
                          model_config=model_config,
-                         base_model_paths=base_model_paths,
-                         lora_modules=lora_modules,
-                         prompt_adapters=None,
+                         models=models,
                          request_logger=request_logger)
 
         self.chat_template = chat_template
@@ -66,6 +66,8 @@ class OpenAIServingTokenization(OpenAIServing):
             tokenizer = await self.engine_client.get_tokenizer(lora_request)
 
             if isinstance(request, TokenizeChatRequest):
+                tool_dicts = (None if request.tools is None else
+                              [tool.model_dump() for tool in request.tools])
                 (
                     _,
                     request_prompts,
@@ -74,6 +76,7 @@ class OpenAIServingTokenization(OpenAIServing):
                     request,
                     tokenizer,
                     request.messages,
+                    tool_dicts=tool_dicts,
                     chat_template=request.chat_template or self.chat_template,
                     chat_template_content_format=self.
                     chat_template_content_format,
@@ -90,11 +93,11 @@ class OpenAIServingTokenization(OpenAIServing):
                      request.prompt,
                      add_special_tokens=request.add_special_tokens,
                  )
-        except ValueError as e:
+        except (ValueError, TypeError, jinja2.TemplateError) as e:
             logger.exception("Error in preprocessing prompt inputs")
-            return self.create_error_response(str(e))
+            return self.create_error_response(f"{e} {e.__cause__}")
 
-        input_ids: List[int] = []
+        input_ids: list[int] = []
         for i, engine_prompt in enumerate(engine_prompts):
             self._log_inputs(request_id,
                              request_prompts[i],
@@ -104,10 +107,16 @@ class OpenAIServingTokenization(OpenAIServing):
 
             # Silently ignore prompt adapter since it does not affect
             # tokenization (Unlike in Embeddings API where an error is raised)
+            if isinstance(engine_prompt,
+                          dict) and "prompt_token_ids" in engine_prompt:
+                input_ids.extend(engine_prompt["prompt_token_ids"])
 
-            input_ids.extend(engine_prompt["prompt_token_ids"])
+        token_strs = None
+        if request.return_token_strs:
+            token_strs = tokenizer.convert_ids_to_tokens(input_ids)
 
         return TokenizeResponse(tokens=input_ids,
+                                token_strs=token_strs,
                                 count=len(input_ids),
                                 max_model_len=self.max_model_len)
 

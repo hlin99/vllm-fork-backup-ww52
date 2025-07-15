@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 import asyncio
 import copy
 import pickle
@@ -16,7 +19,6 @@ from zmq.asyncio import Socket
 from vllm import PoolingParams
 from vllm.config import DecodingConfig, ModelConfig, VllmConfig
 from vllm.core.scheduler import SchedulerOutputs
-from vllm.engine.arg_utils import AsyncEngineArgs
 # yapf conflicts with isort for this block
 # yapf: disable
 from vllm.engine.async_llm_engine import (
@@ -25,9 +27,16 @@ from vllm.engine.multiprocessing import (ENGINE_DEAD_ERROR, IPC_DATA_EXT,
                                          IPC_HEALTH_EXT, IPC_INPUT_EXT,
                                          IPC_OUTPUT_EXT, RPC_REQUEST_T,
                                          VLLM_RPC_SUCCESS_STR, RPCAbortRequest,
-                                         RPCError, RPCProcessRequest,
-                                         RPCStartupRequest, RPCStartupResponse,
-                                         RPCUProfileRequest)
+                                         RPCAdapterLoadedResponse, RPCError,
+                                         RPCIsSleepingRequest,
+                                         RPCIsSleepingResponse,
+                                         RPCLoadAdapterRequest,
+                                         RPCProcessRequest,
+                                         RPCResetMultiModalCacheRequest,
+                                         RPCResetPrefixCacheRequest,
+                                         RPCSleepRequest, RPCStartupRequest,
+                                         RPCStartupResponse,
+                                         RPCUProfileRequest, RPCWakeUpRequest)
 from vllm.engine.protocol import EngineClient
 # yapf: enable
 from vllm.envs import VLLM_RPC_TIMEOUT
@@ -40,7 +49,7 @@ from vllm.outputs import PoolingRequestOutput, RequestOutput
 from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sampling_params import SamplingParams
 from vllm.transformers_utils.tokenizer_group import init_tokenizer_from_configs
-from vllm.utils import deprecate_kwargs
+from vllm.utils import Device, deprecate_kwargs
 
 logger = init_logger(__name__)
 
@@ -86,6 +95,7 @@ class MQLLMEngineClient(EngineClient):
         self._errored_with: Optional[BaseException] = None
 
         # Get the configs.
+        self.vllm_config = engine_config
         self.model_config = engine_config.model_config
         self.decoding_config = engine_config.decoding_config
 
@@ -93,7 +103,6 @@ class MQLLMEngineClient(EngineClient):
         self.tokenizer = init_tokenizer_from_configs(
             model_config=self.model_config,
             scheduler_config=engine_config.scheduler_config,
-            parallel_config=engine_config.parallel_config,
             lora_config=engine_config.lora_config)
         self.input_preprocessor = InputPreprocessor(self.model_config,
                                                     self.tokenizer)
@@ -127,9 +136,9 @@ class MQLLMEngineClient(EngineClient):
         self._engine_process = psutil.Process(engine_pid)
 
     @staticmethod
-    def is_unsupported_config(engine_args: AsyncEngineArgs):
+    def is_unsupported_config(vllm_config: VllmConfig):
         # Pipeline parallel not yet supported
-        return engine_args.pipeline_parallel_size > 1
+        return vllm_config.parallel_config.pipeline_parallel_size > 1
 
     @contextmanager
     def get_data_socket(self) -> Iterator[Socket]:
@@ -240,22 +249,37 @@ class MQLLMEngineClient(EngineClient):
                         queue = self.output_queues.get(request_id)
                         if queue is not None:
                             queue.put_nowait(exception)
+                # Put each output into the appropriate queue.
+                elif isinstance(
+                        request_outputs,
+                    (RPCAdapterLoadedResponse, RPCIsSleepingResponse)):
+                    self._add_output(request_outputs)
                 else:
-                    # Put each output into the appropriate steam.
                     for request_output in request_outputs:
-                        queue = self.output_queues.get(
-                            request_output.request_id)
-                        if queue is not None:
-                            queue.put_nowait(request_output)
+                        self._add_output(request_output)
 
         except asyncio.CancelledError:
             logger.debug("Shutting down MQLLMEngineClient output handler.")
+
+    def _add_output(self, request_output: Union[RequestOutput,
+                                                RPCAdapterLoadedResponse,
+                                                RPCIsSleepingResponse]):
+        queue = self.output_queues.get(request_output.request_id)
+        if queue is not None:
+            queue.put_nowait(request_output)
 
     async def setup(self):
         """Setup the client before it starts sending server requests."""
 
         # Start output_loop
-        self.output_loop = asyncio.create_task(self.run_output_handler_loop())
+        if self.output_loop is None:
+            # only generate once to avoid multiple concurrent output_loops
+            # this will lead to race conditions and wrong orders of tokens
+            # returned by the engine
+            # setup will be called multiple times during the startup of
+            # the engine
+            self.output_loop = asyncio.create_task(
+                self.run_output_handler_loop())
 
         with self.get_data_socket() as socket:
             # Wait until server is ready.
@@ -264,8 +288,9 @@ class MQLLMEngineClient(EngineClient):
             self.tracing_flag = response.tracing_enabled
 
             # Start health_loop.
-            self.health_loop = asyncio.create_task(
-                self.run_heartbeat_loop(timeout=VLLM_RPC_TIMEOUT))
+            if self.health_loop is None:
+                self.health_loop = asyncio.create_task(
+                    self.run_heartbeat_loop(timeout=VLLM_RPC_TIMEOUT))
 
     def close(self):
         """Destroy the ZeroMQ Context."""
@@ -353,6 +378,9 @@ class MQLLMEngineClient(EngineClient):
 
     async def get_tokenizer(self, lora_request: Optional[LoRARequest] = None):
         return await self.tokenizer.get_lora_tokenizer_async(lora_request)
+
+    async def get_vllm_config(self) -> VllmConfig:
+        return self.vllm_config
 
     async def get_decoding_config(self) -> DecodingConfig:
         return self.decoding_config
@@ -465,8 +493,9 @@ class MQLLMEngineClient(EngineClient):
         from the LLMEngine to the caller.
 
         Args:
-            prompt: The prompt to the LLM. See :class:`~vllm.inputs.PromptType`
-                for more details about the format of each input.
+            prompt: The prompt to the LLM. See
+                [`PromptType`][vllm.inputs.PromptType] for more details about
+                the format of each input.
             sampling_params: The sampling parameters of the request.
             request_id: The unique id of the request.
             lora_request: LoRA request to use for generation, if any.
@@ -527,15 +556,16 @@ class MQLLMEngineClient(EngineClient):
         *,
         inputs: Optional[PromptType] = None  # DEPRECATED
     ) -> AsyncGenerator[PoolingRequestOutput, None]:
-        """Generate outputs for a request from an embedding model.
+        """Generate outputs for a request from a pooling model.
 
         Generate outputs for a request. This method is a coroutine. It adds the
         request into the waiting queue of the LLMEngine and streams the outputs
         from the LLMEngine to the caller.
 
         Args:
-            prompt: The prompt to the LLM. See :class:`~vllm.inputs.PromptType`
-                for more details about the format of each input.
+            prompt: The prompt to the LLM. See
+                [`PromptType`][vllm.inputs.PromptType] for more details about
+                the format of each input.
             pooling_params: The pooling parameters of the request.
             request_id: The unique id of the request.
             lora_request: LoRA request to use for generation, if any.
@@ -576,6 +606,10 @@ class MQLLMEngineClient(EngineClient):
         if self._errored_with is not None:
             raise ENGINE_DEAD_ERROR(self._errored_with)
 
+        # Ensure the request id is unique among running requests
+        if request_id in self.output_queues:
+            raise ValueError(f"Request {request_id} already exists")
+
         # Constructing guided decoding logits processors is expensive, so we do
         # it here to avoid contending with cpu resources and the GIL on the
         # backend process.
@@ -585,10 +619,11 @@ class MQLLMEngineClient(EngineClient):
                 build_guided_decoding_logits_processor_async(
                     sampling_params=params,
                     tokenizer=await self.get_tokenizer(lora_request),
-                    default_guided_backend=(self.decoding_config.guided_decoding_backend
+                    default_guided_backend=(self.decoding_config.backend
                         if self.decoding_config
-                        else DecodingConfig.guided_decoding_backend),
-                    model_config=self.model_config
+                        else DecodingConfig.backend),
+                    model_config=self.model_config,
+                    reasoning_backend=self.decoding_config.reasoning_backend,
                 )
 
         # 1) Create output queue for this requests.
@@ -655,3 +690,67 @@ class MQLLMEngineClient(EngineClient):
 
         await self._send_one_way_rpc_request(
             request=RPCUProfileRequest.STOP_PROFILE, socket=self.input_socket)
+
+    async def reset_mm_cache(self) -> None:
+        """Reset the multi-modal cache"""
+
+        await self._send_one_way_rpc_request(
+            request=RPCResetMultiModalCacheRequest.RESET,
+            socket=self.input_socket)
+
+    async def reset_prefix_cache(self,
+                                 device: Optional[Device] = None) -> None:
+        """Reset the prefix cache"""
+
+        await self._send_one_way_rpc_request(
+            request=RPCResetPrefixCacheRequest(device),
+            socket=self.input_socket)
+
+    async def sleep(self, level: int = 1) -> None:
+        """Sleep the engine for a given level"""
+        return await self._send_one_way_rpc_request(
+            request=RPCSleepRequest(level), socket=self.input_socket)
+
+    async def wake_up(self, tags: Optional[list[str]] = None) -> None:
+        """Wake up the engine"""
+        return await self._send_one_way_rpc_request(
+            request=RPCWakeUpRequest(tags), socket=self.input_socket)
+
+    async def is_sleeping(self) -> bool:
+        """Check whether the engine is sleeping"""
+        request = RPCIsSleepingRequest()
+
+        queue: asyncio.Queue[Union[BaseException,
+                                   RPCIsSleepingResponse]] = asyncio.Queue()
+        self.output_queues[request.request_id] = queue
+
+        request_bytes = pickle.dumps(request)
+        await self.input_socket.send_multipart((request_bytes, ), copy=False)
+
+        request_output = await queue.get()
+        self.output_queues.pop(request.request_id)
+
+        if isinstance(request_output, BaseException):
+            raise request_output
+        return request_output.is_sleeping
+
+    async def add_lora(self, lora_request: LoRARequest) -> None:
+        """Load a new LoRA adapter into the engine for future requests."""
+        # Uses the same I/O as generate requests
+        request = RPCLoadAdapterRequest(lora_request)
+
+        # Create output queue for this requests.
+        queue: asyncio.Queue[Union[None, BaseException]] = asyncio.Queue()
+        self.output_queues[request.request_id] = queue
+
+        # Send the request
+        request_bytes = pickle.dumps(request)
+        await self.input_socket.send_multipart((request_bytes, ), copy=False)
+
+        # Wait for the response
+        request_output = await queue.get()
+        self.output_queues.pop(request.request_id)
+
+        # Raise on error, otherwise happily return None
+        if isinstance(request_output, BaseException):
+            raise request_output

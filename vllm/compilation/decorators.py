@@ -1,8 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 import inspect
-from typing import Callable, Dict, List, Optional, TypeVar, Union, overload
+from typing import Callable, Optional, TypeVar, Union, overload
+from unittest.mock import patch
 
 import torch
 import torch.nn as nn
+from torch._dynamo.symbolic_convert import InliningInstructionTranslator
 
 from vllm.compilation.counter import compilation_counter
 from vllm.compilation.wrapper import TorchCompileWrapperWithCustomDispatcher
@@ -21,7 +26,7 @@ _T = TypeVar("_T", bound=type[nn.Module])
 @overload
 def support_torch_compile(
     *,
-    dynamic_arg_dims: Optional[Dict[str, Union[int, List[int]]]],
+    dynamic_arg_dims: Optional[dict[str, Union[int, list[int]]]],
 ) -> Callable[[_T], _T]:
     ...
 
@@ -34,7 +39,7 @@ def support_torch_compile(cls: _T) -> _T:
 def support_torch_compile(
     cls: Optional[_T] = None,
     *,
-    dynamic_arg_dims: Optional[Dict[str, Union[int, List[int]]]] = None,
+    dynamic_arg_dims: Optional[dict[str, Union[int, list[int]]]] = None,
 ) -> Union[Callable[[_T], _T], _T]:
     """
     A decorator to add support for compiling the forward method of a class.
@@ -74,8 +79,8 @@ def support_torch_compile(
     During runtime, when we actually mark dimensions of tensors,
      it depends on the value of arguments:
 
-    - if it is a single integer, the corresponding dimension of the argument
-        will be marked as dynamic.
+    - if it is a single integer (can be negative), the corresponding dimension 
+        of the argument will be marked as dynamic.
     - if it is `None`, ignored.
     - if it is `IntermediateTensors`, all the tensors in the intermediate
         tensors will be marked as dynamic.
@@ -127,7 +132,7 @@ def support_torch_compile(
 
 def _support_torch_compile(
     cls: _T,
-    dynamic_arg_dims: Dict[str, Union[int, List[int]]],
+    dynamic_arg_dims: dict[str, Union[int, list[int]]],
 ) -> _T:
     """
     A decorator to add support for compiling the forward method of a class.
@@ -175,17 +180,29 @@ def _support_torch_compile(
             for k, dims in dynamic_arg_dims.items():
                 arg = bound_args.arguments.get(k)
                 if arg is not None:
+                    dims = [dims] if isinstance(dims, int) else dims
                     if isinstance(arg, torch.Tensor):
+                        # In case dims is specified with negative indexing
+                        dims = [
+                            arg.ndim + dim if dim < 0 else dim for dim in dims
+                        ]
                         torch._dynamo.mark_dynamic(arg, dims)
                     elif isinstance(arg, IntermediateTensors):
                         for tensor in arg.tensors.values():
+                            # In case dims is specified with negative indexing
+                            dims = [
+                                tensor.ndim + dim if dim < 0 else dim
+                                for dim in dims
+                            ]
                             torch._dynamo.mark_dynamic(tensor, dims)
                     else:
                         raise ValueError(
                             "Unsupported dynamic dimensions"
                             f" {dims} for argument {k} with type {type(arg)}.")
             # here, it is the starting point of the `torch.compile` process
-            start_monitoring_torch_compile(self.vllm_config.compilation_config)
+            start_monitoring_torch_compile(self.vllm_config)
+            logger.debug("Start compiling function %s",
+                         self.original_code_object)
 
         # if we don't use custom dispatcher, we can directly call the
         # compiled function and let torch.compile handle the dispatching,
@@ -196,7 +213,31 @@ def _support_torch_compile(
             # we need to control all the compilation of the model.
             torch._dynamo.eval_frame.remove_from_cache(
                 self.original_code_object)
-            return self.compiled_callable(*args, **kwargs)
+
+            # collect all relevant files traced by Dynamo,
+            # so that the compilation cache can trigger re-compilation
+            # properly when any of these files change.
+
+            # 1. the file containing the top-level forward function
+            self.vllm_config.compilation_config.traced_files.add(
+                self.original_code_object.co_filename)
+
+            # 2. every time Dynamo sees a function call, it will inline
+            # the function by calling InliningInstructionTranslator.inline_call
+            # we hijack this function to know all the functions called
+            # during Dynamo tracing, and their corresponding files
+            inline_call = InliningInstructionTranslator.inline_call
+
+            def patched_inline_call(parent, func, args, kwargs):
+                code = func.get_code()
+                self.vllm_config.compilation_config.traced_files.add(
+                    code.co_filename)
+                return inline_call(parent, func, args, kwargs)
+
+            with patch.object(InliningInstructionTranslator, 'inline_call',
+                              patched_inline_call):
+                output = self.compiled_callable(*args, **kwargs)
+            return output
 
         # usually, capturing the model once is enough, and then we can
         # dispatch to the compiled code directly, without going through

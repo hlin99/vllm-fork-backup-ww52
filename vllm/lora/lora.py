@@ -1,9 +1,13 @@
-from typing import List, Optional
-from typing import Sequence as GenericSequence
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
+from collections.abc import Sequence as GenericSequence
+from typing import Optional
 
 import torch
 import torch.types
 
+from vllm.lora.peft_helper import PEFTHelper
 from vllm.utils import is_pin_memory_available
 
 
@@ -60,6 +64,17 @@ class LoRALayerWeights:
             0] if self.embeddings_tensor is not None else 0
 
     @classmethod
+    def from_config(
+        cls,
+        module_name: str,
+        peft_helper: PEFTHelper,
+        embeddings_tensor: Optional[torch.Tensor] = None,
+    ) -> "LoRALayerWeights":
+        return cls(module_name, peft_helper.r, peft_helper.lora_alpha, None,
+                   None, None, embeddings_tensor,
+                   peft_helper.vllm_lora_scaling_factor)
+
+    @classmethod
     def create_dummy_lora_weights(
             cls,
             module_name: str,
@@ -111,11 +126,11 @@ class PackedLoRALayerWeights(LoRALayerWeights):
         self,
         module_name: str,
         rank: int,
-        lora_alphas: List[Optional[int]],
-        lora_a: List[Optional[torch.Tensor]],
-        lora_b: List[Optional[torch.Tensor]],
-        bias: Optional[List[Optional[torch.Tensor]]] = None,
-        scaling: Optional[List[float]] = None,
+        lora_alphas: list[Optional[int]],
+        lora_a: list[Optional[torch.Tensor]],
+        lora_b: list[Optional[torch.Tensor]],
+        bias: Optional[list[Optional[torch.Tensor]]] = None,
+        scaling: Optional[list[float]] = None,
     ) -> None:
         super().__init__(
             module_name=module_name,

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 from fractions import Fraction
 from typing import Callable, Optional, Union
 
@@ -6,6 +9,7 @@ from torch.nn import Parameter
 
 from vllm.distributed import get_tensor_model_parallel_rank
 from vllm.logger import init_logger
+from vllm.model_executor.utils import _make_synced_weight_loader
 
 __all__ = [
     "BasevLLMParameter", "PackedvLLMParameter", "PerTensorScaleParameter",
@@ -37,14 +41,32 @@ class BasevLLMParameter(Parameter):
         :returns: a torch.nn.parameter
         """
 
+        # During weight loading, we often do something like:
+        # narrowed_tensor = param.data.narrow(0, offset, len)
+        # narrowed_tensor.copy_(real_weight)
+        # expecting narrowed_tensor and param.data to share the same storage.
+        # However, on TPUs, narrowed_tensor will lazily propagate to the base
+        # tensor, which is param.data, leading to the redundant memory usage.
+        # This sometimes causes OOM errors during model loading. To avoid this,
+        # we sync the param tensor after its weight loader is called.
+        from vllm.platforms import current_platform
+        if current_platform.is_tpu():
+            weight_loader = _make_synced_weight_loader(weight_loader)
+
         self._weight_loader = weight_loader
 
     @property
     def weight_loader(self):
         return self._weight_loader
 
+    def _is_1d_and_scalar(self, loaded_weight: torch.Tensor):
+        cond1 = self.data.ndim == 1 and self.data.numel() == 1
+        cond2 = loaded_weight.ndim == 0 and loaded_weight.numel() == 1
+        return (cond1 and cond2)
+
     def _assert_and_load(self, loaded_weight: torch.Tensor):
-        assert self.data.shape == loaded_weight.shape
+        assert (self.data.shape == loaded_weight.shape
+                or self._is_1d_and_scalar(loaded_weight))
         self.data.copy_(loaded_weight)
 
     def load_column_parallel_weight(self, loaded_weight: torch.Tensor):
@@ -261,10 +283,12 @@ class PackedColumnParameter(_ColumnvLLMParameter):
                  packed_factor: Union[int, Fraction],
                  packed_dim: int,
                  marlin_tile_size: Optional[int] = None,
+                 bitblas_tile_size: Optional[int] = None,
                  **kwargs):
         self._packed_factor = packed_factor
         self._packed_dim = packed_dim
         self._marlin_tile_size = marlin_tile_size
+        self._bitblas_tile_size = bitblas_tile_size
         super().__init__(**kwargs)
 
     @property
@@ -279,12 +303,17 @@ class PackedColumnParameter(_ColumnvLLMParameter):
     def marlin_tile_size(self):
         return self._marlin_tile_size
 
+    @property
+    def bitblas_tile_size(self):
+        return self._bitblas_tile_size
+
     def adjust_shard_indexes_for_packing(self, shard_size, shard_offset):
         return _adjust_shard_indexes_for_packing(
             shard_size=shard_size,
             shard_offset=shard_offset,
             packed_factor=self.packed_factor,
-            marlin_tile_size=self.marlin_tile_size)
+            marlin_tile_size=self.marlin_tile_size,
+            bitblas_tile_size=self.bitblas_tile_size)
 
 
 class PackedvLLMParameter(ModelWeightParameter):
@@ -302,10 +331,12 @@ class PackedvLLMParameter(ModelWeightParameter):
                  packed_factor: Union[int, Fraction],
                  packed_dim: int,
                  marlin_tile_size: Optional[int] = None,
+                 bitblas_tile_size: Optional[int] = None,
                  **kwargs):
         self._packed_factor = packed_factor
         self._packed_dim = packed_dim
         self._marlin_tile_size = marlin_tile_size
+        self._bitblas_tile_size = bitblas_tile_size
         super().__init__(**kwargs)
 
     @property
@@ -320,12 +351,26 @@ class PackedvLLMParameter(ModelWeightParameter):
     def marlin_tile_size(self):
         return self._marlin_tile_size
 
+    @property
+    def bitblas_tile_size(self):
+        return self._bitblas_tile_size
+
     def adjust_shard_indexes_for_packing(self, shard_size, shard_offset):
         return _adjust_shard_indexes_for_packing(
             shard_size=shard_size,
             shard_offset=shard_offset,
             packed_factor=self.packed_factor,
-            marlin_tile_size=self.marlin_tile_size)
+            marlin_tile_size=self.marlin_tile_size,
+            bitblas_tile_size=self.bitblas_tile_size)
+
+
+class BlockQuantScaleParameter(_ColumnvLLMParameter, RowvLLMParameter):
+    """
+    Parameter class for weight scales loaded for weights with
+    block-wise quantization. Uses both column and row parallelism.
+    """
+
+    pass
 
 
 def permute_param_layout_(param: BasevLLMParameter, input_dim: int,
@@ -391,8 +436,13 @@ def _adjust_shard_indexes_for_marlin(shard_size, shard_offset,
     return shard_size * marlin_tile_size, shard_offset * marlin_tile_size
 
 
+def _adjust_shard_indexes_for_bitblas(shard_size, shard_offset,
+                                      bitblas_tile_size):
+    return shard_size // bitblas_tile_size, shard_offset // bitblas_tile_size
+
+
 def _adjust_shard_indexes_for_packing(shard_size, shard_offset, packed_factor,
-                                      marlin_tile_size):
+                                      marlin_tile_size, bitblas_tile_size):
     shard_size = shard_size // packed_factor
     shard_offset = shard_offset // packed_factor
     if marlin_tile_size is not None:
@@ -400,4 +450,10 @@ def _adjust_shard_indexes_for_packing(shard_size, shard_offset, packed_factor,
             shard_size=shard_size,
             shard_offset=shard_offset,
             marlin_tile_size=marlin_tile_size)
+    elif bitblas_tile_size is not None:
+        return _adjust_shard_indexes_for_bitblas(
+            shard_size=shard_size,
+            shard_offset=shard_offset,
+            bitblas_tile_size=bitblas_tile_size)
+
     return shard_size, shard_offset

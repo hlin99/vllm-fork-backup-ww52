@@ -1,9 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 from typing import Dict, List, Optional, Tuple
 
 try:
     import intel_extension_for_pytorch.llm.modules as ipex_modules
     _use_ipex = True
-except ImportError:
+# AttributeError is to handle a bug in ipex https://github.com/intel/intel-extension-for-pytorch/pull/813
+except (ImportError, AttributeError):
     _use_ipex = False
 
 import torch
@@ -15,7 +19,7 @@ class _PagedAttention:
 
     @staticmethod
     def get_supported_head_sizes() -> List[int]:
-        return [32, 64, 80, 96, 112, 128, 256]
+        return [32, 64, 80, 96, 112, 128, 192, 256]
 
     @staticmethod
     def get_kv_cache_shape(
@@ -52,8 +56,8 @@ class _PagedAttention:
         value_cache: torch.Tensor,
         slot_mapping: torch.Tensor,
         kv_cache_dtype: str,
-        k_scale: float,
-        v_scale: float,
+        k_scale: torch.Tensor,
+        v_scale: torch.Tensor,
         *args,
     ) -> None:
         ops.reshape_and_cache(
@@ -80,8 +84,8 @@ class _PagedAttention:
         num_kv_heads: int,
         scale: float,
         alibi_slopes: Optional[torch.Tensor],
-        k_scale: float,
-        v_scale: float,
+        k_scale: torch.Tensor,
+        v_scale: torch.Tensor,
         *args,
     ) -> None:
         tp_rank: int = 0
@@ -149,8 +153,8 @@ class _IPEXPagedAttention(_PagedAttention):
         value_cache: torch.Tensor,
         slot_mapping: torch.Tensor,
         kv_cache_dtype: str,
-        k_scale: float,
-        v_scale: float,
+        k_scale: torch.Tensor,
+        v_scale: torch.Tensor,
         *args,
     ) -> None:
         ipex_modules.PagedAttention.reshape_and_cache(
@@ -170,8 +174,8 @@ class _IPEXPagedAttention(_PagedAttention):
         num_kv_heads: int,
         scale: float,
         alibi_slopes: Optional[torch.Tensor],
-        k_scale: float,
-        v_scale: float,
+        k_scale: torch.Tensor,
+        v_scale: torch.Tensor,
         *args,
     ) -> None:
         block_size = value_cache.shape[2]

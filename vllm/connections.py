@@ -1,5 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
+from collections.abc import Mapping, MutableMapping
 from pathlib import Path
-from typing import Mapping, MutableMapping, Optional
+from typing import Optional
 from urllib.parse import urlparse
 
 import aiohttp
@@ -29,7 +33,7 @@ class HTTPConnection:
     # required, so that the client is only accessible inside async event loop
     async def get_async_client(self) -> aiohttp.ClientSession:
         if self._async_client is None or not self.reuse_client:
-            self._async_client = aiohttp.ClientSession()
+            self._async_client = aiohttp.ClientSession(trust_env=True)
 
         return self._async_client
 
@@ -164,4 +168,7 @@ class HTTPConnection:
 
 
 global_http_connection = HTTPConnection()
-"""The global :class:`HTTPConnection` instance used by vLLM."""
+"""
+The global [`HTTPConnection`][vllm.connections.HTTPConnection] instance used
+by vLLM.
+"""

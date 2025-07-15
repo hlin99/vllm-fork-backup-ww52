@@ -1,8 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """vLLM: a high-throughput and memory-efficient inference engine for LLMs"""
 from vllm.utils import is_fake_hpu, migrate_to_cpu
 
 if is_fake_hpu():
     migrate_to_cpu()
+# The version.py should be independent library, and we always import the
+# version library first.  Such assumption is critical for some customization.
+from .version import __version__, __version_tuple__  # isort:skip
+
+# The environment variables override should be imported before any other
+# modules to ensure that the environment variables are set before any
+# other modules are imported.
+import vllm.env_override  # isort:skip  # noqa: F401
 
 from vllm.engine.arg_utils import AsyncEngineArgs, EngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine
@@ -11,12 +21,13 @@ from vllm.entrypoints.llm import LLM
 from vllm.executor.ray_utils import initialize_ray_cluster
 from vllm.inputs import PromptType, TextPrompt, TokensPrompt
 from vllm.model_executor.models import ModelRegistry
-from vllm.outputs import (CompletionOutput, PoolingOutput,
-                          PoolingRequestOutput, RequestOutput)
+from vllm.outputs import (ClassificationOutput, ClassificationRequestOutput,
+                          CompletionOutput, EmbeddingOutput,
+                          EmbeddingRequestOutput, PoolingOutput,
+                          PoolingRequestOutput, RequestOutput, ScoringOutput,
+                          ScoringRequestOutput)
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingParams
-
-from .version import __version__, __version_tuple__
 
 __all__ = [
     "__version__",
@@ -31,6 +42,12 @@ __all__ = [
     "CompletionOutput",
     "PoolingOutput",
     "PoolingRequestOutput",
+    "EmbeddingOutput",
+    "EmbeddingRequestOutput",
+    "ClassificationOutput",
+    "ClassificationRequestOutput",
+    "ScoringOutput",
+    "ScoringRequestOutput",
     "LLMEngine",
     "EngineArgs",
     "AsyncLLMEngine",
@@ -38,26 +55,3 @@ __all__ = [
     "initialize_ray_cluster",
     "PoolingParams",
 ]
-
-
-def __getattr__(name: str):
-    import warnings
-
-    if name == "EmbeddingOutput":
-        msg = ("EmbeddingOutput has been renamed to PoolingOutput. "
-               "The original name will be removed in an upcoming version.")
-
-        warnings.warn(DeprecationWarning(msg), stacklevel=2)
-
-        return PoolingOutput
-
-    if name == "EmbeddingRequestOutput":
-        msg = ("EmbeddingRequestOutput has been renamed to "
-               "PoolingRequestOutput. "
-               "The original name will be removed in an upcoming version.")
-
-        warnings.warn(DeprecationWarning(msg), stacklevel=2)
-
-        return PoolingRequestOutput
-
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

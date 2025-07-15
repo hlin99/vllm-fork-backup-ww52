@@ -26,7 +26,13 @@ static inline __device__ int8_t float_to_int8_rn(float x) {
   float dst = std::nearbyint(x);
 
   // saturate
-  dst = std::clamp(dst, i8_min, i8_max);
+
+  // See https://github.com/pytorch/pytorch/issues/127666
+  // See https://github.com/llvm/llvm-project/issues/95183
+  // hip-clang std::clamp __glibcxx_assert_fail host function when building on
+  // Arch/gcc14. The following replaces std::clamp usage with similar logic
+  // dst = std::clamp(dst, i8_min, i8_max);
+  dst = (dst < i8_min) ? i8_min : (dst > i8_max) ? i8_max : dst;
   return static_cast<int8_t>(dst);
 #else
   // CUDA path
@@ -79,7 +85,13 @@ static inline __device__ int8_t int32_to_int8(int32_t x) {
       static_cast<int32_t>(std::numeric_limits<int8_t>::max());
 
   // saturate
-  int32_t dst = std::clamp(x, i8_min, i8_max);
+
+  // See https://github.com/pytorch/pytorch/issues/127666
+  // See https://github.com/llvm/llvm-project/issues/95183
+  // hip-clang std::clamp __glibcxx_assert_fail host function when building on
+  // Arch/gcc14. The following replaces std::clamp usage with similar logic
+  // int32_t dst = std::clamp(x, i8_min, i8_max);
+  int32_t dst = (x < i8_min) ? i8_min : (x > i8_max) ? i8_max : x;
   return static_cast<int8_t>(dst);
 #else
   // CUDA path
@@ -226,7 +238,7 @@ __global__ void dynamic_scaled_int8_azp_quant_kernel(
 void static_scaled_int8_quant(torch::Tensor& out,          // [..., hidden_size]
                               torch::Tensor const& input,  // [..., hidden_size]
                               torch::Tensor const& scale,
-                              c10::optional<torch::Tensor> const& azp) {
+                              std::optional<torch::Tensor> const& azp) {
   TORCH_CHECK(input.is_contiguous());
   TORCH_CHECK(out.is_contiguous());
   TORCH_CHECK(scale.numel() == 1);
@@ -257,7 +269,7 @@ void static_scaled_int8_quant(torch::Tensor& out,          // [..., hidden_size]
 void dynamic_scaled_int8_quant(
     torch::Tensor& out,          // [..., hidden_size]
     torch::Tensor const& input,  // [..., hidden_size]
-    torch::Tensor& scales, c10::optional<torch::Tensor> const& azp) {
+    torch::Tensor& scales, std::optional<torch::Tensor> const& azp) {
   TORCH_CHECK(input.is_contiguous());
   TORCH_CHECK(out.is_contiguous());
   TORCH_CHECK(scales.is_contiguous());

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 # Copyright 2023 The vLLM team.
 # Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
 #
@@ -17,14 +20,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Iterable, Set, Tuple
+from collections.abc import Iterable
 
 import torch
+import torch.nn as nn
 
 from vllm.config import VllmConfig
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.models.llama import LlamaForCausalLM, LlamaModel
 
+from .llama import LlamaDecoderLayer
 from .utils import (AutoWeightsLoader, PPMissingLayer, WeightsMapper,
                     is_pp_missing_parameter)
 
@@ -46,14 +51,14 @@ class TeleChat2Model(LlamaModel):
                 layer.mlp.gate_up_proj.bias = None
                 layer.mlp.gate_up_proj.skip_bias_add = True
 
-    def load_weights(self, weights: Iterable[Tuple[str,
-                                                   torch.Tensor]]) -> Set[str]:
+    def load_weights(self, weights: Iterable[tuple[str,
+                                                   torch.Tensor]]) -> set[str]:
         stacked_params_mapping = [
             ('gate_up_proj', 'gate_proj', 0),
             ('gate_up_proj', 'up_proj', 1),
         ]
         params_dict = dict(self.named_parameters())
-        loaded_params: Set[str] = set()
+        loaded_params: set[str] = set()
         total_num_heads = self.config.n_head
         head_dim = self.config.hidden_size // total_num_heads
         for name, loaded_weight in weights:
@@ -105,27 +110,31 @@ class TeleChat2Model(LlamaModel):
 
 class TeleChat2ForCausalLM(LlamaForCausalLM):
 
-    def _init_model(self, vllm_config: VllmConfig, prefix: str = ""):
+    hf_to_vllm_mapper = WeightsMapper(
+        orig_to_new_prefix={
+            "transformer.": "model.",
+        },
+        orig_to_new_substr={
+            ".h.": ".layers.",
+            ".self_attention.": ".self_attn.",
+            ".word_embeddings.": ".embed_tokens.",
+            ".dense.": ".o_proj.",
+            ".ln_f.": ".norm.",
+        },
+    )
+
+    def _init_model(self,
+                    vllm_config: VllmConfig,
+                    prefix: str = "",
+                    layer_type: type[nn.Module] = LlamaDecoderLayer):
         return TeleChat2Model(vllm_config=vllm_config, prefix=prefix)
 
-    def load_weights(self, weights: Iterable[Tuple[str,
-                                                   torch.Tensor]]) -> Set[str]:
+    def load_weights(self, weights: Iterable[tuple[str,
+                                                   torch.Tensor]]) -> set[str]:
 
-        hf_to_vllm_mapper = WeightsMapper(
-            orig_to_new_prefix={
-                "transformer.": "model.",
-            },
-            orig_to_new_substr={
-                ".h.": ".layers.",
-                ".self_attention.": ".self_attn.",
-                ".word_embeddings.": ".embed_tokens.",
-                ".dense.": ".o_proj.",
-                ".ln_f.": ".norm.",
-            },
-        )
         loader = AutoWeightsLoader(
             self,
             skip_prefixes=(["lm_head."]
                            if self.config.tie_word_embeddings else None),
         )
-        return loader.load_weights(weights, mapper=hf_to_vllm_mapper)
+        return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 import msgspec
 
 from vllm.executor.msgspec_utils import decode_hook, encode_hook

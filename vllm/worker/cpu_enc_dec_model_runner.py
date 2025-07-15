@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 import dataclasses
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type, cast
 
@@ -295,17 +298,16 @@ class CPUEncoderDecoderModelRunner(
             model_input.encoder_input_tokens,
             "encoder_positions":
             model_input.encoder_input_positions,
-            "kv_caches":
-            kv_caches,
-            "attn_metadata":
-            model_input.attn_metadata,
-            **MultiModalKwargs.as_kwargs(model_input.multi_modal_kwargs or {},
-                                         device=self.device),
+            **MultiModalKwargs.as_kwargs(
+                model_input.multi_modal_kwargs or {},
+                device=self.device,
+            ),
             "intermediate_tensors":
             intermediate_tensors,
         }
 
-        with set_forward_context(model_input.attn_metadata, self.vllm_config):
+        with set_forward_context(model_input.attn_metadata, self.vllm_config,
+                                 model_input.virtual_engine):
             hidden_states = model_executable(**execute_model_kwargs)
 
         # Compute the logits.
@@ -317,7 +319,7 @@ class CPUEncoderDecoderModelRunner(
             return []
 
         # Sample the next token.
-        output = self.model.sample(
+        output = self.sampler(
             logits=logits,
             sampling_metadata=model_input.sampling_metadata,
         )

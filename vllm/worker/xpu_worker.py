@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """A XPU worker class."""
 import gc
 import os
@@ -11,20 +13,21 @@ import torch.distributed
 from vllm.config import VllmConfig
 from vllm.distributed import (ensure_model_parallel_initialized,
                               init_distributed_environment)
+from vllm.distributed.parallel_state import get_pp_group
 from vllm.logger import init_logger
 from vllm.model_executor import set_random_seed
 from vllm.platforms import current_platform
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.worker import Worker
-from vllm.worker.worker_base import LoraNotSupportedWorkerBase, WorkerBase
+from vllm.worker.worker_base import LoRANotSupportedWorkerBase, WorkerBase
 from vllm.worker.xpu_model_runner import XPUModelRunner
 
 logger = init_logger(__name__)
 
 
-class XPUWorker(LoraNotSupportedWorkerBase, Worker):
+class XPUWorker(LoRANotSupportedWorkerBase, Worker):
     """A worker class that executes (a partition of) the model on a GPU.
-    
+
     Each worker is associated with a single XPU device. The worker is 
     responsible for maintaining the KV cache and executing the model on the 
     XPU. In case of distributed inference, each worker is assigned a partition
@@ -91,7 +94,7 @@ class XPUWorker(LoraNotSupportedWorkerBase, Worker):
         Then, it calculate the maximum possible number of GPU and CPU blocks
         that can be allocated with the remaining free memory.
 
-        .. tip::
+        Tip:
             You may limit the usage of GPU memory
             by adjusting the `gpu_memory_utilization` parameter.
         """
@@ -176,3 +179,8 @@ class XPUWorker(LoraNotSupportedWorkerBase, Worker):
             parallel_config.pipeline_parallel_size)
         # global all_reduce needed for overall oneccl warm up
         torch.distributed.all_reduce(torch.zeros(1).xpu())
+
+        if parallel_config.pipeline_parallel_size > 1:
+            # Add pp group init to avoid
+            # p2p communication as the first call
+            get_pp_group().all_reduce(torch.zeros(1).xpu())

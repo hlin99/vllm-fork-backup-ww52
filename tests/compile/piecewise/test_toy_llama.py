@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """
 Test the piecewise compilation with a simple model, comparing the output
 with and without the piecewise compilation.
@@ -7,7 +9,7 @@ if the config `tractable_init` is set to True. Otherwise, the weights are
 initialized randomly with a fixed seed.
 """
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Any, Optional
 
 import torch
 from torch import nn
@@ -53,6 +55,17 @@ class LlamaConfig:
     init_value: float = 1.0
     tractable_init: bool = False
     random_seed: int = 0
+
+    def compute_hash(self) -> str:
+        factors: list[Any] = []
+        for k, v in self.__dict__.items():
+            if k == "random_seed":
+                continue
+            factors.append((k, v))
+        factors.sort()
+        import hashlib
+        return hashlib.md5(str(factors).encode(),
+                           usedforsecurity=False).hexdigest()
 
     def __post_init__(self):
         assert self.mlp_size >= self.hidden_size
@@ -163,7 +176,7 @@ class LlamaDecoderLayer(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
         residual: Optional[torch.Tensor],
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         For tractable computation:
         - if residual is None, the outputs are:
@@ -249,12 +262,14 @@ def tractable_computation(input_ids: torch.Tensor,
 @torch.inference_mode
 def run_model(llama_config,
               use_compile: bool,
+              use_inductor: bool,
               split_attn: bool = False) -> torch.Tensor:
 
     if use_compile:
         compilation_config = CompilationConfig(
             level=CompilationLevel.PIECEWISE,
             use_cudagraph=True,
+            use_inductor=use_inductor,
             cudagraph_capture_sizes=[1, 2],
         )
         if split_attn:
@@ -263,7 +278,8 @@ def run_model(llama_config,
         compilation_config = CompilationConfig(
             level=CompilationLevel.NO_COMPILATION, )
 
-    vllm_config = VllmConfig(compilation_config=compilation_config)
+    vllm_config = VllmConfig(compilation_config=compilation_config,
+                             additional_config=llama_config)
     with set_current_vllm_config(vllm_config):
         model = LlamaModel(config=llama_config,
                            vllm_config=vllm_config,
@@ -291,7 +307,7 @@ def run_model(llama_config,
         return output.cpu()
 
 
-def test_toy_llama():
+def _test_toy_llama(*, use_inductor):
     # compare output with and without piecewise compilation
 
     llama_config = LlamaConfig(hidden_size=128,
@@ -310,22 +326,32 @@ def test_toy_llama():
             num_graphs_seen=0,
             num_piecewise_graphs_seen=0,
             num_piecewise_capturable_graphs_seen=0,
-            num_inductor_compilations=0,
+            num_backend_compilations=0,
             num_cudagraph_caputured=0,
     ):
-        outputs.append(run_model(llama_config, use_compile=False))
-    run_model(tractable_config, use_compile=False)
+        outputs.append(
+            run_model(llama_config, use_inductor=False, use_compile=False))
+    run_model(tractable_config, use_inductor=False, use_compile=False)
+
+    if use_inductor:
+        kwargs = {"num_inductor_compiles": 1, "num_eager_compiles": 0}
+    else:
+        kwargs = {"num_eager_compiles": 1, "num_inductor_compiles": 0}
 
     with compilation_counter.expect(
             num_graphs_seen=1,  # one graph for the model
             num_piecewise_graphs_seen=1,
             num_piecewise_capturable_graphs_seen=1,
-            num_inductor_compilations=1,  # num_piecewise_capturable_graphs_seen
+            num_backend_compilations=1,  # num_piecewise_capturable_graphs_seen
             num_cudagraph_caputured=
             2,  # num_cudagraph_sizes * num_piecewise_capturable_graphs_seen
+            **kwargs,
     ):
-        outputs.append(run_model(llama_config, use_compile=True))
-    run_model(tractable_config, use_compile=True)
+        outputs.append(
+            run_model(llama_config,
+                      use_inductor=use_inductor,
+                      use_compile=True))
+    run_model(tractable_config, use_inductor=use_inductor, use_compile=True)
 
     with compilation_counter.expect(
             num_graphs_seen=1,  # one graph for the model
@@ -333,18 +359,32 @@ def test_toy_llama():
             1,  # 2 * num_layers + 1
             num_piecewise_capturable_graphs_seen=1 +
             llama_config.num_layers,  # 1 + num_layers
-            num_inductor_compilations=1 +
+            num_backend_compilations=1 +
             llama_config.num_layers,  # num_piecewise_capturable_graphs_seen
             num_cudagraph_caputured=2 *
         (1 + llama_config.num_layers
          ),  # num_cudagraph_sizes * num_piecewise_capturable_graphs_seen
     ):
         outputs.append(
-            run_model(llama_config, use_compile=True, split_attn=True))
-    run_model(tractable_config, use_compile=True, split_attn=True)
+            run_model(llama_config,
+                      use_inductor=use_inductor,
+                      use_compile=True,
+                      split_attn=True))
+    run_model(tractable_config,
+              use_inductor=use_inductor,
+              use_compile=True,
+              split_attn=True)
 
     for i in range(1, len(outputs)):
         assert torch.allclose(outputs[0], outputs[i])
+
+
+def test_toy_llama_inductor():
+    _test_toy_llama(use_inductor=True)
+
+
+def test_toy_no_inductor():
+    _test_toy_llama(use_inductor=False)
 
 
 @torch.inference_mode

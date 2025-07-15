@@ -1,13 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Make sure bad_words works.
 
 Run `pytest tests/samplers/test_no_bad_words.py`.
 
 """
-from typing import List, Optional
+from typing import Optional
 
+import pytest
 from transformers import AutoTokenizer
 
 from vllm import LLM, SamplingParams
+
+
+@pytest.fixture(autouse=True)
+def v1(run_with_both_engines):
+    """We can run both engines for this test."""
+    pass
 
 
 def _generate(
@@ -15,8 +24,8 @@ def _generate(
     prompt: str,
     num_prompt_tokens: int,
     temperature: float = 0,
-    bad_words: Optional[List[str]] = None,
-) -> List[int]:
+    bad_words: Optional[list[str]] = None,
+) -> list[int]:
     sampling_params = SamplingParams(
         temperature=temperature,
         bad_words=bad_words,
@@ -58,7 +67,7 @@ class TestOneTokenBadWord:
 
     def _generate(self,
                   model: LLM,
-                  bad_words: Optional[List[str]] = None) -> List[int]:
+                  bad_words: Optional[list[str]] = None) -> list[int]:
         return _generate(
             model=model,
             prompt=self.PROMPT,
@@ -68,14 +77,14 @@ class TestOneTokenBadWord:
 
     def _encode(self,
                 prompt: str,
-                add_special_tokens: bool = True) -> List[int]:
+                add_special_tokens: bool = True) -> list[int]:
         return self.tokenizer(prompt,
                               add_special_tokens=add_special_tokens).input_ids
 
 
 class TestTwoTokenBadWord:
     # Another model (with a different tokenizer behaviour)
-    MODEL = "openai-community/gpt2"
+    MODEL = "distilbert/distilgpt2"
 
     PROMPT = "How old are you? I am 10"
     TARGET_TOKEN1 = "years"
@@ -95,7 +104,7 @@ class TestTwoTokenBadWord:
                                                 add_special_tokens=False)[0]
 
     def test_two_token_bad_word(self, vllm_runner):
-        with vllm_runner(self.MODEL) as llm:
+        with vllm_runner(self.MODEL, dtype="half") as llm:
             output_token_ids = self._generate(llm)
             assert output_token_ids[:2] == [
                 self.target_token_id1, self.target_token_id2
@@ -148,7 +157,7 @@ class TestTwoTokenBadWord:
 
     def _generate(self,
                   model: LLM,
-                  bad_words: Optional[List[str]] = None) -> List[int]:
+                  bad_words: Optional[list[str]] = None) -> list[int]:
         return _generate(
             model=model,
             prompt=self.PROMPT,
@@ -157,7 +166,7 @@ class TestTwoTokenBadWord:
         )
 
     @staticmethod
-    def _contains(sequence: List[int], subsequence: List[int]) -> bool:
+    def _contains(sequence: list[int], subsequence: list[int]) -> bool:
         searched = False
 
         for start in range(len(sequence)):
@@ -180,6 +189,6 @@ class TestTwoTokenBadWord:
 
     def _encode(self,
                 prompt: str,
-                add_special_tokens: bool = True) -> List[int]:
+                add_special_tokens: bool = True) -> list[int]:
         return self.tokenizer(prompt,
                               add_special_tokens=add_special_tokens).input_ids

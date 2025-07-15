@@ -32,7 +32,7 @@ class ScalarType {
         signed_(signed_),
         bias(bias),
         finite_values_only(finite_values_only),
-        nan_repr(nan_repr){};
+        nan_repr(nan_repr) {};
 
   static constexpr ScalarType int_(uint8_t size_bits, int32_t bias = 0) {
     return ScalarType(0, size_bits - 1, true, bias);
@@ -315,6 +315,8 @@ static inline constexpr auto kS8 = ScalarType::int_(8);
 static inline constexpr auto kU8 = ScalarType::uint(8);
 static inline constexpr auto kU8B128 = ScalarType::uint(8, 128);
 
+static inline constexpr auto kFE2M1f =
+    ScalarType::float_(2, 1, true, ScalarType::NAN_NONE);
 static inline constexpr auto kFE3M2f =
     ScalarType::float_(3, 2, true, ScalarType::NAN_NONE);
 static inline constexpr auto kFE4M3fn =
@@ -332,6 +334,7 @@ static inline constexpr auto kInt8 = kS8;
 static inline constexpr auto kUint8 = kU8;
 static inline constexpr auto kUint8b128 = kU8B128;
 
+static inline constexpr auto kFloat4_e2m1f = kFE2M1f;
 static inline constexpr auto kFloat6_e3m2f = kFE3M2f;
 static inline constexpr auto kFloat8_e4m3fn = kFE4M3fn;
 static inline constexpr auto kFloat8_e5m2 = kFE5M2;

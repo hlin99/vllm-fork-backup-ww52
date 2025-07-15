@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 import copy
 import dataclasses
 from contextlib import contextmanager
@@ -11,8 +14,12 @@ class CompilationCounter:
     num_piecewise_graphs_seen: int = 0
     # not including the splitting ops
     num_piecewise_capturable_graphs_seen: int = 0
-    num_inductor_compilations: int = 0
+    num_backend_compilations: int = 0
     num_cudagraph_caputured: int = 0
+    # InductorAdapter.compile calls
+    num_inductor_compiles: int = 0
+    # EagerAdapter.compile calls
+    num_eager_compiles: int = 0
 
     def clone(self) -> "CompilationCounter":
         return copy.deepcopy(self)

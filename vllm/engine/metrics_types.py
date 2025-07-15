@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """
 These types are defined in this file to avoid importing vllm.engine.metrics
 and therefore importing prometheus_client.
@@ -14,9 +16,9 @@ do this in Python code and lazily import prometheus_client.
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Protocol
+from typing import List, Optional
 
-from vllm.config import VllmConfig
+from vllm.config import SupportsMetricsInfo, VllmConfig
 from vllm.spec_decode.metrics import SpecDecodeWorkerMetrics
 
 
@@ -52,9 +54,6 @@ class Stats:
     time_inference_requests: List[float]
     time_prefill_requests: List[float]
     time_decode_requests: List[float]
-    time_in_queue_requests: List[float]
-    model_forward_time_requests: List[float]
-    model_execute_time_requests: List[float]
     #   Metadata
     num_prompt_tokens_requests: List[int]
     num_generation_tokens_requests: List[int]
@@ -67,12 +66,6 @@ class Stats:
     max_lora: str
 
     spec_decode_metrics: Optional["SpecDecodeWorkerMetrics"] = None
-
-
-class SupportsMetricsInfo(Protocol):
-
-    def metrics_info(self) -> Dict[str, str]:
-        ...
 
 
 class StatLoggerBase(ABC):

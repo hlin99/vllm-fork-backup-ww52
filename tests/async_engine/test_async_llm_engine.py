@@ -1,10 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 import asyncio
 import os
 import uuid
 from asyncio import CancelledError
 from copy import copy
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Optional
 
 import pytest
 import pytest_asyncio
@@ -39,7 +42,7 @@ class MockEngine:
         self.abort_request_calls = 0
         self.request_id = None
         # Ugly, remove dependency when possible
-        self.parallel_config = ParallelConfig(1, 1, False)
+        self.parallel_config = ParallelConfig()
         self.model_config = MockModelConfig()
 
     async def step_async(self, virtual_engine):
@@ -127,7 +130,7 @@ async def test_new_requests_event():
     assert engine.get_decoding_config() is not None
 
 
-def start_engine():
+def start_engine(enforce_eager: bool):
     wait_for_gpu_memory_to_clear(
         devices=list(range(torch.cuda.device_count())),
         threshold_bytes=2 * 2**30,
@@ -139,7 +142,7 @@ def start_engine():
 
     return AsyncLLMEngine.from_engine_args(
         AsyncEngineArgs(model="facebook/opt-125m",
-                        enforce_eager=True,
+                        enforce_eager=enforce_eager,
                         num_scheduler_steps=num_scheduler_steps))
 
 
@@ -147,10 +150,20 @@ def uid() -> str:
     return str(uuid.uuid4())
 
 
-@pytest_asyncio.fixture(scope="module")
-async def async_engine():
-    engine = await asyncio.get_event_loop().run_in_executor(executor=None,
-                                                            func=start_engine)
+@pytest_asyncio.fixture(scope="module",
+                        params=[{
+                            "enforce_eager": False
+                        }, {
+                            "enforce_eager": True
+                        }])
+async def async_engine(request):
+    # We cannot use monkeypatch since this is a module
+    # scoped fixture and monkeypatch is function scoped.
+    previous_value = os.getenv("VLLM_USE_V1", None)
+    os.environ["VLLM_USE_V1"] = "0"
+    engine = await asyncio.get_event_loop().run_in_executor(
+        executor=None,
+        func=lambda: start_engine(request.param["enforce_eager"]))
     try:
         yield engine
     finally:
@@ -158,6 +171,11 @@ async def async_engine():
         del engine
         await asyncio.sleep(0.1)
         cleanup_dist_env_and_memory()
+
+        if previous_value:
+            os.environ["VLLM_USE_V1"] = previous_value
+        else:
+            del os.environ["VLLM_USE_V1"]
 
 
 @pytest.fixture()
@@ -252,7 +270,7 @@ async def test_output_kinds(async_engine, stop):
         params.output_kind = RequestOutputKind.DELTA
 
         prompt_tokens = None
-        output_tokens: List[int] = []
+        output_tokens: list[int] = []
         output_text = ""
         output_count = 0
         final_output = None

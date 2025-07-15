@@ -1,3 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
+###############################################################################
+# Copyright (C) 2025 Habana Labs, Ltd. an Intel Company
+###############################################################################
+
 import dataclasses
 from typing import Dict, Optional, Tuple
 

@@ -13,6 +13,10 @@
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_store.cuh>
 
+#ifdef USE_ROCM
+    namespace cub = hipcub;
+#endif
+
 #include "static_switch.h"
 
 
@@ -53,12 +57,12 @@ void set_conv_params_fwd(ConvParamsBase &params,
                          const at::Tensor x,
                          const at::Tensor weight,
                          const at::Tensor out,
-                         const c10::optional<at::Tensor>& bias,
+                         const std::optional<at::Tensor>& bias,
                          bool silu_activation,
                          int64_t pad_slot_id,
-                         const c10::optional<at::Tensor>& query_start_loc = std::nullopt,
-                         const c10::optional<at::Tensor>& cache_indices = std::nullopt,
-                         const c10::optional<at::Tensor>& has_initial_state = std::nullopt) {
+                         const std::optional<at::Tensor>& query_start_loc = std::nullopt,
+                         const std::optional<at::Tensor>& cache_indices = std::nullopt,
+                         const std::optional<at::Tensor>& has_initial_state = std::nullopt) {
 
     // Reset the parameters
     memset(&params, 0, sizeof(params));
@@ -93,11 +97,11 @@ void set_conv_params_fwd(ConvParamsBase &params,
 
 
 void causal_conv1d_fwd(const at::Tensor &x, const at::Tensor &weight,
-                  const c10::optional<at::Tensor> &bias_,
-                  const c10::optional<at::Tensor> &conv_states,
-                  const c10::optional<at::Tensor> &query_start_loc,
-                  const c10::optional<at::Tensor> &cache_indices,
-                  const c10::optional<at::Tensor> &has_initial_state,
+                  const std::optional<at::Tensor> &bias_,
+                  const std::optional<at::Tensor> &conv_states,
+                  const std::optional<at::Tensor> &query_start_loc,
+                  const std::optional<at::Tensor> &cache_indices,
+                  const std::optional<at::Tensor> &has_initial_state,
                   bool silu_activation,
                  // used to identify padding entries if cache_indices provided
                  // in case of padding, the kernel will return early
@@ -194,10 +198,10 @@ void causal_conv1d_fwd(const at::Tensor &x, const at::Tensor &weight,
 void causal_conv1d_update(const at::Tensor &x,
                      const at::Tensor &conv_state,
                      const at::Tensor &weight,
-                     const c10::optional<at::Tensor> &bias_,
+                     const std::optional<at::Tensor> &bias_,
                      bool silu_activation,
-                     const c10::optional<at::Tensor> &cache_seqlens_,
-                     const c10::optional<at::Tensor> &conv_state_indices_,
+                     const std::optional<at::Tensor> &cache_seqlens_,
+                     const std::optional<at::Tensor> &conv_state_indices_,
                      // used to identify padding entries if cache_indices provided
                      // in case of padding, the kernel will return early
                      int64_t pad_slot_id) {
@@ -422,7 +426,7 @@ void causal_conv1d_fwd_kernel(ConvParamsBase params) {
         int final_state_position =  ((seqlen - (kWidth - 1)) - (n_chunks - 1) * kChunkSize);
         // in case the final state is separated between the last "smem_exchange" and 
         // and the one before it (chunk = n_chunks - 1 and chunk = n_chunks - 2), 
-        // (which occurs when `final_state_position` is a non-positivie index)
+        // (which occurs when `final_state_position` is a non-positive index)
         // we load the correct data from smem_exchange from both chunks, the last chunk iteration and the one before it
         if (conv_states != nullptr && final_state_position < 0 && seqlen > kWidth){
             input_t vals_load[kNElts] = {0};
@@ -501,15 +505,9 @@ void causal_conv1d_fwd_launch(ConvParamsBase &params, cudaStream_t stream) {
         auto kernel = &causal_conv1d_fwd_kernel<Ktraits>;
 
         if (kSmemSize >= 48 * 1024) {
-            #ifndef USE_ROCM
-            C10_CUDA_CHECK(cudaFuncSetAttribute(
-                kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
-            #else
-            // There is a slight signature discrepancy in HIP and CUDA "FuncSetAttribute" function.
             C10_CUDA_CHECK(cudaFuncSetAttribute(
                 (void *) kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
             std::cerr << "Warning (causal_conv1d fwd launch): attempting to set maxDynamicSharedMemorySize on an AMD GPU which is currently a non-op (in ROCm versions <= 6.1). This might lead to undefined behavior. \n" << std::endl;
-            #endif
         }
         kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
 

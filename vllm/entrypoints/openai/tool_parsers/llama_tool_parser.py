@@ -1,12 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 import json
-import re
+from collections.abc import Sequence
 from json import JSONDecoder
-from typing import Dict, List, Sequence, Union
+from typing import Union
 
 import partial_json_parser
+import regex as re
 from partial_json_parser.core.options import Allow
 from transformers import PreTrainedTokenizerBase
 
+from vllm.entrypoints.chat_utils import random_tool_call_id
 from vllm.entrypoints.openai.protocol import (ChatCompletionRequest,
                                               DeltaFunctionCall, DeltaMessage,
                                               DeltaToolCall,
@@ -18,12 +23,12 @@ from vllm.entrypoints.openai.tool_parsers.utils import (find_common_prefix,
                                                         is_complete_json,
                                                         partial_json_loads)
 from vllm.logger import init_logger
-from vllm.utils import random_uuid
 
 logger = init_logger(__name__)
 
 
 @ToolParserManager.register_module("llama3_json")
+@ToolParserManager.register_module("llama4_json")
 class Llama3JsonToolParser(ToolParser):
     """
     Tool call parser for Llama 3.1 models intended for use with the
@@ -38,10 +43,10 @@ class Llama3JsonToolParser(ToolParser):
 
         # initialize properties used for state when parsing tool calls in
         # streaming mode
-        self.prev_tool_call_arr: List[Dict] = []
+        self.prev_tool_call_arr: list[dict] = []
         self.current_tool_id: int = -1
         self.current_tool_name_sent: bool = False
-        self.streamed_args_for_tool: List[str] = [
+        self.streamed_args_for_tool: list[str] = [
         ]  # map what has been streamed for each tool so far to a list
         self.bot_token = "<|python_tag|>"
         self.bot_token_id = tokenizer.encode(self.bot_token,
@@ -76,7 +81,7 @@ class Llama3JsonToolParser(ToolParser):
                 start_idx += end_idx + len('; ')
                 function_call_arr.append(obj)
 
-            tool_calls: List[ToolCall] = [
+            tool_calls: list[ToolCall] = [
                 ToolCall(
                     type="function",
                     function=FunctionCall(
@@ -84,7 +89,8 @@ class Llama3JsonToolParser(ToolParser):
                         # function call args are JSON but as a string
                         arguments=json.dumps(raw_function_call["arguments"] \
                                 if "arguments" in raw_function_call \
-                                else raw_function_call["parameters"])))
+                                else raw_function_call["parameters"],
+                                ensure_ascii=False)))
                 for raw_function_call in function_call_arr
             ]
 
@@ -150,7 +156,7 @@ class Llama3JsonToolParser(ToolParser):
                 return None
 
             # select as the current tool call the one we're on the state at
-            current_tool_call: Dict = tool_call_arr[self.current_tool_id] \
+            current_tool_call: dict = tool_call_arr[self.current_tool_id] \
                 if len(tool_call_arr) > 0 else {}
 
             # case -- if no tokens have been streamed for the tool, e.g.
@@ -170,7 +176,8 @@ class Llama3JsonToolParser(ToolParser):
                 if self.current_tool_id >= 0:
                     cur_arguments = current_tool_call.get("arguments")
                     if cur_arguments:
-                        cur_args_json = json.dumps(cur_arguments)
+                        cur_args_json = json.dumps(cur_arguments,
+                                                   ensure_ascii=False)
                         sent = len(
                             self.streamed_args_for_tool[self.current_tool_id])
                         argument_diff = cur_args_json[sent:]
@@ -204,7 +211,7 @@ class Llama3JsonToolParser(ToolParser):
                     delta = DeltaMessage(tool_calls=[
                         DeltaToolCall(index=self.current_tool_id,
                                       type="function",
-                                      id=f"chatcmpl-tool-{random_uuid()}",
+                                      id=random_tool_call_id(),
                                       function=DeltaFunctionCall(
                                           name=function_name).model_dump(
                                               exclude_none=True))
@@ -222,7 +229,8 @@ class Llama3JsonToolParser(ToolParser):
                 if cur_arguments:
                     sent = len(
                         self.streamed_args_for_tool[self.current_tool_id])
-                    cur_args_json = json.dumps(cur_arguments)
+                    cur_args_json = json.dumps(cur_arguments,
+                                               ensure_ascii=False)
                     prev_arguments = self.prev_tool_call_arr[
                         self.current_tool_id].get("arguments")
 
@@ -230,7 +238,8 @@ class Llama3JsonToolParser(ToolParser):
                     if is_complete[self.current_tool_id]:
                         argument_diff = cur_args_json[sent:]
                     elif prev_arguments:
-                        prev_args_json = json.dumps(prev_arguments)
+                        prev_args_json = json.dumps(prev_arguments,
+                                                    ensure_ascii=False)
                         if cur_args_json != prev_args_json:
 
                             prefix = find_common_prefix(

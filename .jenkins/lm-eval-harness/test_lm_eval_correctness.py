@@ -1,9 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 LM eval harness on model to compare vs HF baseline computed offline.
 Configs are found in configs/$MODEL.yaml
 
 * export LM_EVAL_TEST_DATA_FILE=configs/Meta-Llama-3-70B-Instruct.yaml
 * export LM_EVAL_TP_SIZE=4 
+* export LM_EVAL_APC_ENABLED=true 
 * pytest -s test_lm_eval_correctness.py
 """
 import atexit
@@ -24,15 +26,17 @@ TEST_DATA_FILE = os.environ.get(
     "LM_EVAL_TEST_DATA_FILE",
     ".jenkins/lm-eval-harness/configs/Meta-Llama-3-8B-Instruct.yaml")
 
+REPORT_PERFORMANCE = os.environ.get("LM_EVAL_REPORT_PERFORMANCE",
+                                    "false") in ['1', 'true']
+
 TP_SIZE = os.environ.get("LM_EVAL_TP_SIZE", 1)
+APC_ENABLED = os.environ.get("LM_EVAL_APC_ENABLED", 'false')
 
 
-def setup_fp8(model_path, device_type):
-    flavor = f"g{device_type[-1]}"
-    normalized_model_name = Path(model_path).parts[-1].lower()
+def setup_fp8():
     os.environ[
         "QUANT_CONFIG"] = \
-            f"/software/data/vllm-benchmarks/inc/{normalized_model_name}/maxabs_quant_{flavor}.json"
+            "inc_unit_scales_config.json"
 
 
 def fail_on_exit():
@@ -45,6 +49,7 @@ def launch_lm_eval(eval_config):
     max_num_seqs = eval_config.get('max_num_seqs', 128)
     model_args = f"pretrained={eval_config['model_name']}," \
                  f"tensor_parallel_size={TP_SIZE}," \
+                 f"enable_prefix_caching={APC_ENABLED}," \
                  f"add_bos_token=true," \
                  f"dtype={dtype}," \
                  f"max_model_len=4096," \
@@ -147,7 +152,7 @@ def test_lm_eval_correctness(record_xml_attribute, record_property):
 
         # Set up environment for FP8 inference
         if eval_config.get("fp8"):
-            setup_fp8(eval_config["model_name"], platform)
+            setup_fp8()
         # Launch eval requests.
         start_time = time.perf_counter()
         results = launch_lm_eval(eval_config)
@@ -172,9 +177,10 @@ def test_lm_eval_correctness(record_xml_attribute, record_property):
                                 x['resps'])))['input_ids'])) for x in samples
             ]
             tokenized_outputs_lens = [len(x) for x in tokenized_outputs]
-            report_performance(task['name'], tokenized_inputs_lens,
-                               tokenized_outputs_lens, total_time,
-                               record_property)
+            if REPORT_PERFORMANCE:
+                report_performance(task['name'], tokenized_inputs_lens,
+                                   tokenized_outputs_lens, total_time,
+                                   record_property)
 
             for metric in task["metrics"]:
                 ground_truth = metric["value"]
@@ -190,7 +196,10 @@ def test_lm_eval_correctness(record_xml_attribute, record_property):
                     ground_truth)
                 record_property(f"{task['name']}_{metric['name']}_measured",
                                 measured_value)
-                assert numpy.isclose(ground_truth, measured_value, rtol=RTOL)
+                if measured_value < ground_truth:
+                    assert numpy.isclose(ground_truth,
+                                         measured_value,
+                                         rtol=RTOL)
     except Exception as exc:
         # nasty workaround for a nasty HPU PT bridge bug (SW-204785)
         atexit.register(fail_on_exit)

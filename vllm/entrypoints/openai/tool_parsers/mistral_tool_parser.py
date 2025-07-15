@@ -1,10 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 import json
-import re
+from collections.abc import Sequence
 from random import choices
 from string import ascii_letters, digits
-from typing import Dict, List, Sequence, Union
+from typing import Union
 
 import partial_json_parser
+import regex as re
 from partial_json_parser.core.options import Allow
 from pydantic import Field
 
@@ -19,7 +23,6 @@ from vllm.entrypoints.openai.tool_parsers.utils import (
     extract_intermediate_diff)
 from vllm.logger import init_logger
 from vllm.transformers_utils.tokenizer import AnyTokenizer, MistralTokenizer
-from vllm.utils import random_uuid
 
 logger = init_logger(__name__)
 
@@ -32,16 +35,26 @@ class MistralToolCall(ToolCall):
 
     @staticmethod
     def generate_random_id():
-        # Mistral Tool Call Ids must be alphanumeric with a maximum length of 9.
+        # Mistral Tool Call Ids must be alphanumeric with a length of 9.
         # https://github.com/mistralai/mistral-common/blob/21ee9f6cee3441e9bb1e6ed2d10173f90bd9b94b/src/mistral_common/protocol/instruct/validator.py#L299
         return "".join(choices(ALPHANUMERIC, k=9))
+
+    @staticmethod
+    def is_valid_id(id: str) -> bool:
+        return id.isalnum() and len(id) == 9
+
+
+def _is_fn_name_regex_support(model_tokenizer: AnyTokenizer) -> bool:
+    return isinstance(model_tokenizer, MistralTokenizer) \
+        and model_tokenizer.version >= 11
 
 
 @ToolParserManager.register_module("mistral")
 class MistralToolParser(ToolParser):
     """
-    Tool call parser for Mistral 7B Instruct v0.3, intended for use with the
-    examples/tool_chat_template_mistral.jinja template.
+    Tool call parser for Mistral 7B Instruct v0.3, intended for use with
+    - [`mistral_common`](https://github.com/mistralai/mistral-common/)
+    - the examples/tool_chat_template_mistral.jinja template.
 
     Used when --enable-auto-tool-choice --tool-call-parser mistral are all set
     """
@@ -55,18 +68,37 @@ class MistralToolParser(ToolParser):
 
         # initialize properties used for state when parsing tool calls in
         # streaming mode
-        self.prev_tool_call_arr: List[Dict] = []
+        self.prev_tool_call_arr: list[dict] = []
         self.current_tool_id: int = -1
         self.current_tool_name_sent: bool = False
-        self.streamed_args_for_tool: List[str] = [
+        self.streamed_args_for_tool: list[str] = [
         ]  # map what has been streamed for each tool so far to a list
         self.bot_token = "[TOOL_CALLS]"
         self.bot_token_id = self.vocab.get(self.bot_token)
         self.tool_call_regex = re.compile(r"\[{.*}\]", re.DOTALL)
+        if _is_fn_name_regex_support(self.model_tokenizer):
+            self.fn_name_regex = re.compile(r'([a-zA-Z0-9_-]+)(\{.*?\})',
+                                            re.DOTALL)
+        else:
+            self.fn_name_regex = None
+
         if self.bot_token_id is None:
             raise RuntimeError(
                 "Mistral Tool Parser could not locate the tool call token in "
                 "the tokenizer!")
+
+    def adjust_request(
+            self, request: ChatCompletionRequest) -> ChatCompletionRequest:
+        if not isinstance(
+                self.model_tokenizer, MistralTokenizer
+        ) and request.tools and request.tool_choice != 'none':
+            # Do not skip special tokens when using chat template
+            # with Mistral parser as TOOL_CALL token is needed
+            # for tool detection.
+            # Note: we don't want skip_special_tokens=False
+            # with MistralTokenizer as it is incompatible
+            request.skip_special_tokens = False
+        return request
 
     def extract_tool_calls(
         self,
@@ -89,11 +121,25 @@ class MistralToolParser(ToolParser):
         tool_content = model_output.replace(self.bot_token, "").strip()
 
         try:
-
             # we first try to directly load the json as parsing very nested
             # jsons is difficult
             try:
-                function_call_arr = json.loads(tool_content)
+                if self.fn_name_regex:
+                    matches = self.fn_name_regex.findall(tool_content)
+
+                    function_call_arr = []
+                    for match in matches:
+                        fn_name = match[0]
+                        args = match[1]
+
+                        # fn_name is encoded outside serialized json dump
+                        # only arguments are serialized
+                        function_call_arr.append({
+                            "name": fn_name,
+                            "arguments": json.loads(args)
+                        })
+                else:
+                    function_call_arr = json.loads(tool_content)
             except json.JSONDecodeError:
                 # use a regex to find the part corresponding to the tool call.
                 # NOTE: This use case should not happen if the model is trained
@@ -103,13 +149,14 @@ class MistralToolParser(ToolParser):
                 function_call_arr = json.loads(raw_tool_call)
 
             # Tool Call
-            tool_calls: List[MistralToolCall] = [
+            tool_calls: list[MistralToolCall] = [
                 MistralToolCall(
                     type="function",
                     function=FunctionCall(
                         name=raw_function_call["name"],
                         # function call args are JSON but as a string
-                        arguments=json.dumps(raw_function_call["arguments"])))
+                        arguments=json.dumps(raw_function_call["arguments"],
+                                             ensure_ascii=False)))
                 for raw_function_call in function_call_arr
             ]
 
@@ -170,7 +217,7 @@ class MistralToolParser(ToolParser):
             # tool calls are generated in an array, so do partial JSON
             # parsing on the entire array
             try:
-                tool_call_arr: List[Dict] = partial_json_parser.loads(
+                tool_call_arr: list[dict] = partial_json_parser.loads(
                     parsable_arr, flags)
             except partial_json_parser.core.exceptions.MalformedJSON:
                 logger.debug('not enough tokens to parse into JSON yet')
@@ -178,7 +225,7 @@ class MistralToolParser(ToolParser):
 
             # select as the current tool call the one we're on the state at
 
-            current_tool_call: Dict = tool_call_arr[self.current_tool_id] \
+            current_tool_call: dict = tool_call_arr[self.current_tool_id] \
                 if len(tool_call_arr) > 0 else {}
 
             # case -- if no tokens have been streamed for the tool, e.g.
@@ -199,7 +246,7 @@ class MistralToolParser(ToolParser):
                     diff: Union[str, None] = current_tool_call.get("arguments")
 
                     if diff:
-                        diff = json.dumps(diff).replace(
+                        diff = json.dumps(diff, ensure_ascii=False).replace(
                             self.streamed_args_for_tool[self.current_tool_id],
                             "")
                         delta = DeltaMessage(tool_calls=[
@@ -232,7 +279,7 @@ class MistralToolParser(ToolParser):
                     delta = DeltaMessage(tool_calls=[
                         DeltaToolCall(index=self.current_tool_id,
                                       type="function",
-                                      id=f"chatcmpl-tool-{random_uuid()}",
+                                      id=MistralToolCall.generate_random_id(),
                                       function=DeltaFunctionCall(
                                           name=function_name).model_dump(
                                               exclude_none=True))
@@ -250,6 +297,8 @@ class MistralToolParser(ToolParser):
                 cur_arguments = current_tool_call.get("arguments")
 
                 new_text = delta_text.replace("\'", "\"")
+                if ('"}' in new_text):
+                    new_text = new_text[:new_text.rindex('"}')]
 
                 if not cur_arguments and not prev_arguments:
 
@@ -260,12 +309,15 @@ class MistralToolParser(ToolParser):
                         "mid-arguments")
                     delta = None
                 elif cur_arguments and not prev_arguments:
-                    cur_arguments_json = json.dumps(cur_arguments)
+                    cur_arguments_json = json.dumps(cur_arguments,
+                                                    ensure_ascii=False)[:-2]
                     logger.debug("finding %s in %s", new_text,
                                  cur_arguments_json)
 
+                    if (new_text not in cur_arguments_json):
+                        return None
                     arguments_delta = cur_arguments_json[:cur_arguments_json.
-                                                         index(new_text) +
+                                                         rindex(new_text) +
                                                          len(new_text)]
                     logger.debug("First tokens in arguments received: %s",
                                  arguments_delta)
@@ -279,8 +331,10 @@ class MistralToolParser(ToolParser):
                         self.current_tool_id] += arguments_delta
 
                 elif cur_arguments and prev_arguments:
-                    cur_args_json = json.dumps(cur_arguments)
-                    prev_args_json = json.dumps(prev_arguments)
+                    cur_args_json = json.dumps(cur_arguments,
+                                               ensure_ascii=False)
+                    prev_args_json = json.dumps(prev_arguments,
+                                                ensure_ascii=False)
                     logger.debug("Searching for diff between \n%s\n%s",
                                  cur_args_json, prev_args_json)
 

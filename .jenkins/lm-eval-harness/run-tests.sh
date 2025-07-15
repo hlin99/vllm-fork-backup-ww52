@@ -9,18 +9,25 @@ usage() {
     echo
     echo "  -c    - path to the test data config (e.g. configs/small-models.txt)"
     echo "  -t    - tensor parallel size"
+    echo "  -a    - enable automatic prefix caching"
+
     echo
 }
 
 SUCCESS=0
-
-while getopts "c:t:" OPT; do
+APC_ENABLED="false"
+TIMEOUT_S=900 # 15 minutes timeout per test
+TP_SIZE=1
+while getopts "c:t:a" OPT; do
   case ${OPT} in
     c ) 
         CONFIG="$OPTARG"
         ;;
     t )
         TP_SIZE="$OPTARG"
+        ;;
+    a )
+        APC_ENABLED="true"
         ;;
     \? )
         usage
@@ -40,18 +47,25 @@ do
 
     export LM_EVAL_TEST_DATA_FILE=$PWD/configs/${MODEL_CONFIG}
     export LM_EVAL_TP_SIZE=$TP_SIZE
+    export LM_EVAL_APC_ENABLED=$APC_ENABLED
     export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
     export VLLM_SKIP_WARMUP=true
+    export TQDM_BAR_FORMAT="{desc}: {percentage:3.0f}% {bar:10} | {n_fmt}/{total_fmt} [{elapsed}<{remaining}]" 
     RANDOM_SUFFIX=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 4; echo)
-    JUNIT_SUFFIX=""
+    JUNIT_FAMILY=""
+    JUNIT_XML=""
     if [[ -n "$TEST_RESULTS_DIR" ]]; then
         LOG_DIR=$TEST_RESULTS_DIR
         LOG_FILENAME="test_${MODEL_CONFIG}_${RANDOM_SUFFIX}.xml"
         LOG_PATH="${LOG_DIR}/${LOG_FILENAME}"
-        JUNIT_SUFFIX="-o junit_family=xunit1 --junitxml=${LOG_PATH}"
+        JUNIT_FAMILY="-o junit_family=xunit1"
+        JUNIT_XML="--junitxml=${LOG_PATH}"
     fi
-    pytest -s test_lm_eval_correctness.py "$JUNIT_SUFFIX" || LOCAL_SUCCESS=$?
-
+    timeout $TIMEOUT_S pytest -s test_lm_eval_correctness.py "$JUNIT_FAMILY" "$JUNIT_XML" &
+    TEST_PROCESS=$!
+    wait $TEST_PROCESS
+    LOCAL_SUCCESS=$?
+    kill -9 $TEST_PROCESS 2> /dev/null || true
     if [[ $LOCAL_SUCCESS == 0 ]]; then
         echo "=== PASSED MODEL: ${MODEL_CONFIG} ==="
     else

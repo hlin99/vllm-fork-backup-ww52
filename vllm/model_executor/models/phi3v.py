@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 # Copyright 2024 The vLLM team.
 # Copyright 2024 Microsoft and the HuggingFace Inc. team. All rights reserved.
 #
@@ -12,39 +15,40 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from functools import cached_property
-from typing import (Iterable, List, Literal, Mapping, Optional, Set, Tuple,
-                    TypedDict, Union)
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any, Literal, Optional, TypedDict, Union
 
+import regex as re
 import torch
 import torch.nn as nn
 from transformers import (BatchFeature, CLIPVisionConfig, PretrainedConfig,
                           ProcessorMixin)
 
-from vllm.attention import AttentionMetadata
 from vllm.config import VllmConfig
-from vllm.inputs import InputContext
 from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization import QuantizationConfig
-from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
-from vllm.model_executor.models.clip import CLIPVisionModel
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.multimodal.image import cached_get_image_processor
-from vllm.multimodal.inputs import MultiModalKwargs, NestedTensors
+from vllm.multimodal.inputs import (MultiModalDataDict, MultiModalFieldConfig,
+                                    MultiModalKwargs)
+from vllm.multimodal.parse import (ImageEmbeddingItems, ImageProcessorItems,
+                                   ImageSize, MultiModalDataItems)
+# yapf conflicts with isort for this block
+# yapf: disable
 from vllm.multimodal.processing import (BaseMultiModalProcessor,
-                                        InputProcessingContext,
-                                        ModalityProcessingMetadata,
-                                        MultiModalDataDict,
-                                        MultiModalProcessingMetadata,
-                                        PromptReplacement)
+                                        BaseProcessingInfo, BoundPromptUpdate,
+                                        PlaceholderFeaturesInfo,
+                                        PromptReplacement, PromptUpdate)
+# yapf: enable
+from vllm.multimodal.profiling import BaseDummyInputsBuilder
 from vllm.sequence import IntermediateTensors
 from vllm.utils import is_list_of
 
-from .clip import dummy_image_for_clip
-from .interfaces import SupportsMultiModal, SupportsPP
+from .clip import CLIPVisionModel
+from .interfaces import (MultiModalEmbeddings, SupportsMultiModal, SupportsPP,
+                         SupportsQuant)
 from .utils import (AutoWeightsLoader, WeightsMapper, flatten_bn,
                     init_vllm_registered_model, maybe_prefix,
                     merge_multimodal_embeddings)
@@ -53,10 +57,6 @@ logger = init_logger(__name__)
 
 # Cannot find the following 2 numbers from hf config.
 _IMAGE_TOKEN_ID = 32044
-
-# Result in the max possible feature size (h:w = 16:1)
-MAX_IMAGE_FEATURE_SIZE_HEIGHT = 8000
-MAX_IMAGE_FEATURE_SIZE_WIDTH = 50
 
 CLIP_VIT_LARGE_PATCH14_336_CONFIG = CLIPVisionConfig(dropout=0.0,
                                                      hidden_act="quick_gelu",
@@ -95,7 +95,7 @@ def _init_img_processor(hf_config: PretrainedConfig,
 
 class Phi3VImagePixelInputs(TypedDict):
     type: Literal["pixel_values"]
-    data: Union[torch.Tensor, List[torch.Tensor]]
+    data: Union[torch.Tensor, list[torch.Tensor]]
     """
     Shape:
     `(batch_size * num_images, 1 + num_patches, num_channels, height, width)`
@@ -114,7 +114,7 @@ class Phi3VImagePixelInputs(TypedDict):
 
 class Phi3VImageEmbeddingInputs(TypedDict):
     type: Literal["image_embeds"]
-    data: Union[torch.Tensor, List[torch.Tensor]]
+    data: Union[torch.Tensor, list[torch.Tensor]]
     """Shape: `(batch_size * num_images, image_feature_size, hidden_size)`
 
     `hidden_size` must match the hidden size of language model backbone.
@@ -305,105 +305,222 @@ class Phi3HDImageEmbedding(Phi3ImageEmbeddingBase):
         return image_features_hd_newline
 
 
-def get_max_phi3v_image_tokens(ctx: InputContext,
-                               *,
-                               num_crops: Optional[int] = None):
-    mm_processor_kwargs = {}
-    if num_crops is not None:
-        mm_processor_kwargs["num_crops"] = num_crops
+class Phi3VProcessingInfo(BaseProcessingInfo):
 
-    model_config = ctx.model_config
-    image_processor = cached_get_image_processor(
-        model_config.model,
-        trust_remote_code=model_config.trust_remote_code,
-        **mm_processor_kwargs,
-    )
-
-    num_tokens = image_processor.calc_num_image_tokens_from_image_size(
-        width=MAX_IMAGE_FEATURE_SIZE_WIDTH,
-        height=MAX_IMAGE_FEATURE_SIZE_HEIGHT,
-    )
-    return num_tokens
-
-
-def dummy_mm_kwargs_for_phi3v(ctx: InputProcessingContext,
-                              mm_counts: Mapping[str, int]):
-    num_images = mm_counts["image"]
-
-    data = dummy_image_for_clip(
-        CLIP_VIT_LARGE_PATCH14_336_CONFIG,
-        num_images,
-        image_width_override=MAX_IMAGE_FEATURE_SIZE_WIDTH,
-        image_height_override=MAX_IMAGE_FEATURE_SIZE_HEIGHT,
-    )
-
-    hf_processor = ctx.get_hf_processor()
-    image_processor = hf_processor.image_processor  # type: ignore
-    hf_inputs = image_processor.preprocess(data['image'], return_tensors="pt")
-
-    return MultiModalKwargs(**hf_inputs)
-
-
-def create_metadata_for_phi3v(
-        ctx: InputProcessingContext) -> MultiModalProcessingMetadata:
-    return {
-        "image":
-        ModalityProcessingMetadata(prompt_repls=[
-            PromptReplacement(target=[_IMAGE_TOKEN_ID],
-                              repl_unit=[_IMAGE_TOKEN_ID],
-                              repl_count=get_max_phi3v_image_tokens(ctx)),
-        ]),
-    }
-
-
-class Phi3VProcessor(BaseMultiModalProcessor):
-
-    def __init__(self, ctx: InputProcessingContext) -> None:
-        super().__init__(
-            ctx=ctx,
-            metadata=create_metadata_for_phi3v(ctx),
-        )
-
-    def _get_hf_processor(
+    def get_hf_processor(
         self,
         *,
         num_crops: Optional[int] = None,
+        **kwargs: object,
     ) -> ProcessorMixin:
         if num_crops is not None:
-            return self.ctx.get_hf_processor(num_crops=num_crops)
-        return self.ctx.get_hf_processor()
+            kwargs["num_crops"] = num_crops
 
-    def _apply_hf_processor(
+        return self.ctx.get_hf_processor(**kwargs)
+
+    def get_supported_mm_limits(self) -> Mapping[str, Optional[int]]:
+        return {"image": None}
+
+    def get_num_image_tokens(
+        self,
+        *,
+        image_width: int,
+        image_height: int,
+        processor: Optional[ProcessorMixin] = None,
+    ) -> int:
+        if processor is None:
+            processor = self.get_hf_processor()
+
+        return processor.calc_num_image_tokens_from_image_size(  # type: ignore
+            width=image_width,
+            height=image_height,
+        )
+
+    def get_image_size_with_most_features(self) -> ImageSize:
+        # Result in the max possible feature size (h:w = 16:1)
+        return ImageSize(height=8000, width=50)
+
+
+class Phi3VDummyInputsBuilder(BaseDummyInputsBuilder[Phi3VProcessingInfo]):
+
+    def get_dummy_text(self, mm_counts: Mapping[str, int]) -> str:
+        num_images = mm_counts.get("image", 0)
+
+        hf_processor = self.info.get_hf_processor()
+        image_tokens: list[str] = hf_processor.img_tokens  # type: ignore
+
+        return "".join(image_tokens[:num_images])
+
+    def get_dummy_mm_data(
+        self,
+        seq_len: int,
+        mm_counts: Mapping[str, int],
+    ) -> MultiModalDataDict:
+        num_images = mm_counts.get("image", 0)
+
+        target_width, target_height = \
+            self.info.get_image_size_with_most_features()
+
+        return {
+            "image":
+            self._get_dummy_images(width=target_width,
+                                   height=target_height,
+                                   num_images=num_images)
+        }
+
+
+class Phi3VMultiModalProcessor(BaseMultiModalProcessor[Phi3VProcessingInfo]):
+
+    def _call_hf_processor(
         self,
         prompt: str,
-        mm_data: MultiModalDataDict,
-        mm_processor_kwargs: Mapping[str, object],
+        mm_data: Mapping[str, object],
+        mm_kwargs: Mapping[str, object],
     ) -> BatchFeature:
-        processed_outputs = super()._apply_hf_processor(
-            prompt, mm_data, mm_processor_kwargs)
+        processed_outputs = super()._call_hf_processor(
+            prompt=prompt,
+            mm_data=mm_data,
+            mm_kwargs=mm_kwargs,
+        )
+
+        input_ids = processed_outputs["input_ids"]
+        assert isinstance(input_ids, torch.Tensor)
+
         # Phi3v processor has inserted -1, -2 etc as placeholder in prompt_ids,
         # which will cause OverflowError when decoding the prompt_ids.
         # Therefore, we need to do an early replacement here
-        token_ids = processed_outputs['input_ids']
-        token_ids[token_ids < 0] = _IMAGE_TOKEN_ID
-        processed_outputs['input_ids'] = token_ids
+        input_ids.masked_fill_(input_ids < 0, _IMAGE_TOKEN_ID)
+
         return processed_outputs
 
-    def _get_dummy_mm_kwargs(
+    def _get_mm_fields_config(
         self,
-        mm_counts: Mapping[str, int],
-    ) -> MultiModalKwargs:
-        return dummy_mm_kwargs_for_phi3v(self.ctx, mm_counts)
+        hf_inputs: BatchFeature,
+        hf_processor_mm_kwargs: Mapping[str, object],
+    ) -> Mapping[str, MultiModalFieldConfig]:
+        return dict(
+            pixel_values=MultiModalFieldConfig.batched("image"),
+            image_sizes=MultiModalFieldConfig.batched("image"),
+            image_embeds=MultiModalFieldConfig.batched("image"),
+        )
+
+    def _get_prompt_updates(
+        self,
+        mm_items: MultiModalDataItems,
+        hf_processor_mm_kwargs: Mapping[str, Any],
+        out_mm_kwargs: MultiModalKwargs,
+    ) -> Sequence[PromptUpdate]:
+        hf_processor = self.info.get_hf_processor(**hf_processor_mm_kwargs)
+        image_tokens: list[str] = hf_processor.img_tokens  # type: ignore
+
+        def get_replacement_phi3v(item_idx: int):
+            images = mm_items.get_items(
+                "image", (ImageEmbeddingItems, ImageProcessorItems))
+
+            if isinstance(images, ImageEmbeddingItems):
+                num_image_tokens = images.get_feature_size(item_idx)
+            else:
+                image_size = images.get_image_size(item_idx)
+                num_image_tokens = self.info.get_num_image_tokens(
+                    image_width=image_size.width,
+                    image_height=image_size.height,
+                    processor=hf_processor,
+                )
+
+            return [_IMAGE_TOKEN_ID] * num_image_tokens
+
+        num_images = mm_items.get_count("image", strict=False)
+
+        return [
+            PromptReplacement(
+                modality="image",
+                target=image_token,
+                replacement=get_replacement_phi3v,
+            ) for image_token in image_tokens[:num_images]
+        ]
+
+    def _apply_prompt_updates(
+        self,
+        token_ids: list[int],
+        mm_prompt_updates: Mapping[str, Sequence[BoundPromptUpdate]],
+        mm_item_counts: Mapping[str, int],
+    ) -> tuple[list[int], str, Mapping[str, list[PlaceholderFeaturesInfo]]]:
+        # align to hf behavior when there are images
+        if len(mm_item_counts):
+            tokenizer = self.info.get_tokenizer()
+            # to decode token_ids to the original text, we need to
+            # 1. remove the first bos token
+            # 2. remove space after each special token
+            #    introduced by the tokenizer
+            if len(token_ids) and token_ids[0] == tokenizer.bos_token_id:
+                token_ids = token_ids[1:]
+            text = tokenizer.decode(token_ids)
+            for special_tokens in tokenizer.special_tokens_map.values():
+                if isinstance(special_tokens, str):
+                    text = text.replace(f"{special_tokens} ", special_tokens)
+                elif isinstance(special_tokens, list):
+                    for special_token in special_tokens:
+                        text = text.replace(f"{special_token} ", special_token)
+            # perform hf behavior
+            # https://huggingface.co/microsoft/Phi-3.5-vision-instruct/blob/64f88b6/processing_phi3_v.py#L407
+            pattern = r"<\|image_\d+\|>"
+            prompt_chunks = [
+                tokenizer(chunk).input_ids
+                for chunk in re.split(pattern, text)
+            ]
+            image_tags = [
+                tokenizer(chunk, add_special_tokens=False).input_ids
+                for chunk in re.findall(pattern, text)
+            ]
+            if len(prompt_chunks) > len(image_tags):
+                image_tags.append([])
+            token_ids = [
+                e for sublist in zip(prompt_chunks, image_tags)
+                for ele in sublist for e in ele
+            ]
+
+        token_ids, text, placeholders = super()._apply_prompt_updates(
+            token_ids=token_ids,
+            mm_prompt_updates=mm_prompt_updates,
+            mm_item_counts=mm_item_counts,
+        )
+
+        # Keep the behavior in line with HF processor
+        if text.startswith("<s> <|image|>"):
+            text = text.replace("<s> <|image|>", "<s><|image|>", 1)
+            token_ids = [token_ids[0], *token_ids[2:]]
+            placeholders = {
+                modality: [
+                    PlaceholderFeaturesInfo(
+                        modality=p.modality,
+                        item_idx=p.item_idx,
+                        start_idx=p.start_idx - 1,
+                        tokens=p.tokens,
+                        is_embed=p.is_embed,
+                    ) for p in ps
+                ]
+                for modality, ps in placeholders.items()
+            }
+
+        return token_ids, text, placeholders
 
 
-@MULTIMODAL_REGISTRY.register_max_image_tokens(get_max_phi3v_image_tokens)
-@MULTIMODAL_REGISTRY.register_processor(Phi3VProcessor)
-class Phi3VForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
+@MULTIMODAL_REGISTRY.register_processor(Phi3VMultiModalProcessor,
+                                        info=Phi3VProcessingInfo,
+                                        dummy_inputs=Phi3VDummyInputsBuilder)
+class Phi3VForCausalLM(nn.Module, SupportsMultiModal, SupportsPP,
+                       SupportsQuant):
+    hf_to_vllm_mapper = WeightsMapper(
+        orig_to_new_prefix={
+            "model.vision_embed_tokens.wte": "embed_tokens",
+            "model.vision_embed_tokens.": "vision_embed_tokens.",
+            "lm_head.": "language_model.lm_head.",
+            "model.": "language_model.model.",
+        })
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
         config = vllm_config.model_config.hf_config
-        quant_config = vllm_config.quant_config
         multimodal_config = vllm_config.model_config.multimodal_config
         self.config = config
         self.multimodal_config = multimodal_config
@@ -413,14 +530,14 @@ class Phi3VForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
             config.vocab_size,
             config.hidden_size,
             org_num_embeddings=config.vocab_size,
-            quant_config=quant_config,
+            quant_config=self.quant_config,
             prefix=maybe_prefix(prefix, "model.embed_tokens"),
         )
 
         # TODO: Optionally initializes this for supporting input embeddings.
         self.vision_embed_tokens = Phi3HDImageEmbedding(
             config,
-            quant_config,
+            self.quant_config,
             prefix=maybe_prefix(prefix, "model.vision_embed_tokens"))
 
         self.language_model = init_vllm_registered_model(
@@ -436,13 +553,6 @@ class Phi3VForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
 
         self.make_empty_intermediate_tensors = (
             self.language_model.make_empty_intermediate_tensors)
-
-    @cached_property
-    def sampler(self):
-        if hasattr(self.language_model, "sampler"):
-            return self.language_model.sampler
-
-        return get_sampler()
 
     def _validate_image_sizes(self, data: torch.Tensor) -> torch.Tensor:
         expected_dims = (2, )
@@ -462,8 +572,8 @@ class Phi3VForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
         return data
 
     def _validate_pixel_values(
-        self, data: Union[torch.Tensor, List[torch.Tensor]]
-    ) -> Union[torch.Tensor, List[torch.Tensor]]:
+        self, data: Union[torch.Tensor, list[torch.Tensor]]
+    ) -> Union[torch.Tensor, list[torch.Tensor]]:
 
         h = w = CLIP_VIT_LARGE_PATCH14_336_CONFIG.image_size
         expected_dims = (3, h, w)
@@ -532,7 +642,7 @@ class Phi3VForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
                 # 3D tensor
                 return list(torch.unbind(image_data, dim=0))
             raise ValueError(
-                "We expect batched 2D tensors;"
+                "We expect batched 2D tensors; "
                 "this can be either a list of 2D tensors or a single 3D tensor."
             )
 
@@ -542,7 +652,11 @@ class Phi3VForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
 
         return image_embeds
 
-    def get_multimodal_embeddings(self, **kwargs) -> Optional[NestedTensors]:
+    def get_language_model(self) -> torch.nn.Module:
+        return self.language_model
+
+    def get_multimodal_embeddings(
+            self, **kwargs: object) -> Optional[MultiModalEmbeddings]:
         image_input = self._parse_and_validate_image_input(**kwargs)
         if image_input is None:
             return None
@@ -552,7 +666,7 @@ class Phi3VForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
     def get_input_embeddings(
         self,
         input_ids: torch.Tensor,
-        multimodal_embeddings: Optional[NestedTensors] = None,
+        multimodal_embeddings: Optional[MultiModalEmbeddings] = None,
     ) -> torch.Tensor:
         inputs_embeds = self.embed_tokens(input_ids)
         if multimodal_embeddings is not None:
@@ -564,8 +678,6 @@ class Phi3VForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
     def forward(self,
                 input_ids: torch.Tensor,
                 positions: torch.Tensor,
-                kv_caches: List[torch.Tensor],
-                attn_metadata: AttentionMetadata,
                 intermediate_tensors: Optional[IntermediateTensors] = None,
                 inputs_embeds: Optional[torch.Tensor] = None,
                 **kwargs: object):
@@ -583,8 +695,6 @@ class Phi3VForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
 
         hidden_states = self.language_model.model(input_ids,
                                                   positions,
-                                                  kv_caches,
-                                                  attn_metadata,
                                                   intermediate_tensors,
                                                   inputs_embeds=inputs_embeds)
 
@@ -598,26 +708,12 @@ class Phi3VForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
         return self.language_model.compute_logits(hidden_states,
                                                   sampling_metadata)
 
-    def sample(
-        self,
-        logits: torch.Tensor,
-        sampling_metadata: SamplingMetadata,
-    ) -> Optional[SamplerOutput]:
-        return self.language_model.sample(logits, sampling_metadata)
-
-    def load_weights(self, weights: Iterable[Tuple[str,
-                                                   torch.Tensor]]) -> Set[str]:
-        hf_to_vllm_mapper = WeightsMapper(
-            orig_to_new_prefix={
-                "model.vision_embed_tokens.wte": "embed_tokens",
-                "model.vision_embed_tokens.": "vision_embed_tokens.",
-                "lm_head.": "language_model.lm_head.",
-                "model.": "language_model.model.",
-            })
+    def load_weights(self, weights: Iterable[tuple[str,
+                                                   torch.Tensor]]) -> set[str]:
 
         loader = AutoWeightsLoader(self)
         autoloaded_weights = loader.load_weights(weights,
-                                                 mapper=hf_to_vllm_mapper)
+                                                 mapper=self.hf_to_vllm_mapper)
 
         # The HF config doesn't specify whether these are tied,
         # so we detect it this way
