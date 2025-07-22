@@ -284,6 +284,7 @@ class MooncakeStoreConnector(KVConnectorBase):
             store_key_prefix = self.tensor_hash(current_tokens_cpu)
             logger.debug(f"hash takes time: {time.time() - start_time}")
             logger.debug(f"send token len: {slen}, token: {current_tokens_cpu}")
+            print(f"send token len: {slen}")
             keys, values = [], []
             start = 0
             padded_total_size = (slen + self.block_size - 1) // self.block_size * self.block_size
@@ -351,6 +352,8 @@ class MooncakeStoreConnector(KVConnectorBase):
         # 3. empty tensor
         # 4. hidden_or_intermediate_states [1, hidden_size]
         for idx, slen in enumerate(seq_lens):
+            print(f"recv token len: {slen}")
+    
             current_tokens = input_tokens_tensor_cpu[idx][:slen]
             num_blocks = (slen + 127) // 128
             end_block_idx = start_block_idx + num_blocks
