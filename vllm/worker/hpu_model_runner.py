@@ -1436,6 +1436,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_groups = flatten(block_groups)
         block_usage = flatten(block_usage)
 
+#        if len(block_list) != 1:
+#            print(" block_list=", block_list, len(block_list))
+#            print(" block_groups=", block_groups)
+#            print(" block_usage=", block_usage)
+#            print(" input_positions=", input_positions)
+
         assert len(block_list) == len(block_groups)
         assert len(block_list) == len(block_usage)
 
