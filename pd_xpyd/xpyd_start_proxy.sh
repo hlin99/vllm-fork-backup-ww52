@@ -83,10 +83,10 @@ if [ "$DEBUG_MODE" == "1" ]; then
     CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_demo_debugmode.py \
         --model $MODEL_PATH \
         --prefill $PREFILL_ARGS \
-        --decode $DECODE_ARGS \
-        --port 8868 \
+        --decode 10.239.129.81:8200 \
+	--port 8868 \
         --repeat_p_request 1 \
-        --repeat_d_times 639 \
+        --repeat_d_times 191 \
         --debug_mode"
 
 else
@@ -94,7 +94,7 @@ else
     CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_demo.py \
         --model $MODEL_PATH \
         --prefill $PREFILL_ARGS \
-        --decode $DECODE_ARGS \
+        --decode 10.239.129.81:8200 \
         --port 8868"
 fi
 

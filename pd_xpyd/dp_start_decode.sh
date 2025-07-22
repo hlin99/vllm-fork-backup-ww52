@@ -36,6 +36,8 @@ if [ "$DP_SIZE" -eq 1 ]; then
   unset VLLM_DP_MASTER_PORT
 fi
 
+#export VLLM_PROFILER_ENABLED=true
+
 for ((i=0; i<$DP_RANK; i++))
 do
   RANK=$((DP_INDEX * DP_RANK + i))
@@ -60,7 +62,11 @@ do
 
   if [ "$DP_RANK" -ne 1 ]; then
     echo "env VLLM_DP_RANK=$RANK ${CMD[*]}"
-    env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${CMD[@]}" &
+    if [ "$i" -eq 0 ] && [ "$DP_INDEX" -eq 0 ]; then
+        env VLLM_PROFILER_ENABLED=true VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${CMD[@]}" &
+    else
+	env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${CMD[@]}" &
+    fi
   else
     echo "${CMD[*]}"
     "${CMD[@]}" &

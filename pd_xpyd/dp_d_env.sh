@@ -8,7 +8,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 model_path=/mnt/disk2/hf_models/DeepSeek-R1-BF16-w8afp8-static-no-ste-G2/
 
 export VLLM_GPU_MEMORY_UTILIZATION=0.9
-export VLLM_GRAPH_RESERVED_MEM=0.2
+export VLLM_GRAPH_RESERVED_MEM=0.1
 export VLLM_GRAPH_PROMPT_RATIO=0
 
 # enable delayed samping on decode
@@ -17,7 +17,7 @@ export VLLM_DELAYED_SAMPLING="true"
 # params
 model_len=40960
 max_num_batched_tokens=40960
-max_num_seqs=16
+max_num_seqs=12
 input_min=128
 input_max=32768
 output_max=4096
@@ -38,7 +38,7 @@ export VLLM_PROMPT_SEQ_BUCKET_MAX=1
 
 #export VLLM_DECODE_BLOCK_BUCKET_MIN=2048
 export VLLM_DECODE_BS_BUCKET_STEP=1
-#export VLLM_DECODE_BLOCK_BUCKET_STEP=2
+#export VLLM_DECODE_BLOCK_BUCKET_STEP=768
 
 echo " environments are reseted "
 
