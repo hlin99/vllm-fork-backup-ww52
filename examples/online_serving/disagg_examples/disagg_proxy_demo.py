@@ -39,7 +39,7 @@ AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
 #logging.basicConfig(level=logging.INFO)
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='[%(asctime)s] %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
@@ -438,6 +438,32 @@ class RoundRobinSchedulingPolicy(SchedulingPolicy):
     def schedule(self, cycler: itertools.cycle, request: Optional[dict[str, any]] = None) -> str:
         return self.safe_next(cycler)
 
+import requests
+import re
+def get_kv_cache_usage(metrics_url="http://localhost:8000/metrics"):
+    try:
+        response = requests.get(metrics_url)
+        response.raise_for_status()
+        metrics_text = response.text
+
+        pattern = r'vllm:gpu_cache_usage_perc\{model_name="([^"]+)"\} ([0-9.]+)'
+        matches = re.findall(pattern, metrics_text)
+
+        if not matches:
+            logger.error(f"No KV usages avaliable from metrics!")
+            return None
+
+        model_name, value = matches[0]
+        kv_usage_val = float(value)
+        kv_usage_val = round(kv_usage_val, 4)
+
+        logger.info(f"KV Cache usage: {kv_usage_val}")
+        return kv_usage_val
+
+    except requests.RequestException as e:
+        logger.error(f"request kv cache usage error")
+        return None
+
 class LoadBalancedScheduler(SchedulingPolicy):
 
     def __init__(
@@ -447,7 +473,9 @@ class LoadBalancedScheduler(SchedulingPolicy):
     ):
         self.prefill_utils_counter = [0] * len(prefill_instances)
         self.prefill_bs_counter = [0] * len(prefill_instances)
+        self.decode_kv_utils_counter = [0] * len(decode_instances)  #KV cache utils
         self.decode_bs_counter = [0] * len(decode_instances)
+
         self.prefill_instances = prefill_instances
         self.decode_instances = decode_instances
         print(" LoadBalancedScheduler, prefill/decode instance is = ", len(self.prefill_bs_counter), len(self.decode_bs_counter))
@@ -466,7 +494,31 @@ class LoadBalancedScheduler(SchedulingPolicy):
                 return self.prefill_instances[min_index]
             else:
                 min_value = min(self.decode_bs_counter)
-                min_index = self.decode_bs_counter.index(min_value)
+
+                if min_value == 0:
+                    min_index = self.decode_bs_counter.index(min_value)
+                    logger.debug(f"min value is 0, return index: {min_index} w/o further calculations")
+                else:
+                    min_indices = [i for i, val in enumerate(self.decode_bs_counter) if val == min_value]
+                    logger.debug(f"min_indices: {min_indices}")
+                    if all(x == 0 for x in self.decode_kv_utils_counter):    
+                        logger.warning(f"self.decode_kv_utils_counter is not initialized, start initializing....")
+                        start_time = time.time()
+                        self.decode_kv_utils_counter = [
+                            get_kv_cache_usage(f"http://{ip}/metrics") or 0.0
+                            for ip in self.decode_instances
+                        ]
+                        logger.debug(f" self.decode_kv_utils_counter: {self.decode_kv_utils_counter}, initial took {time.time() - start_time} second")
+
+                    values = [self.decode_kv_utils_counter[i] for i in min_indices]
+                    min_pos = 0
+                    min_val = values[0]
+                    for idx, val in enumerate(values):
+                        if val < min_val:
+                            min_val = val
+                            min_pos = idx
+                    min_index = min_indices[min_pos]
+
                 self.decode_bs_counter[min_index] += 1
                 logger.info(f"<schedule decode>  instance = {min_index}, min_batch = {min_value}")
                 return self.decode_instances[min_index]
