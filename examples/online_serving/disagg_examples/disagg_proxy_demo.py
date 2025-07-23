@@ -39,7 +39,7 @@ AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
 #logging.basicConfig(level=logging.INFO)
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='[%(asctime)s] %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
@@ -457,7 +457,7 @@ def get_kv_cache_usage(metrics_url="http://localhost:8000/metrics"):
         kv_usage_val = float(value)
         kv_usage_val = round(kv_usage_val, 3)
 
-        logger.info(f"KV Cache usage: {kv_usage_val}")
+        #logger.info(f"KV Cache usage: {kv_usage_val}")
         return kv_usage_val
 
     except requests.RequestException as e:
@@ -497,10 +497,10 @@ class LoadBalancedScheduler(SchedulingPolicy):
 
                 if min_value == 0:
                     min_index = self.decode_bs_counter.index(min_value)
-                    logger.debug(f"min value is 0, return index: {min_index} w/o further calculations")
+                    logger.info(f"min value is 0, return index: {min_index} w/o further calculations")
                 else:
                     min_indices = [i for i, val in enumerate(self.decode_bs_counter) if val == min_value]
-                    logger.debug(f"min_indices: {min_indices}")
+                    logger.info(f"min_indices: {min_indices}")
                     if all(x == 0 for x in self.decode_kv_utils_counter):    
                         logger.warning(f"self.decode_kv_utils_counter is not initialized, start initializing....")
                         start_time = time.time()
@@ -508,7 +508,7 @@ class LoadBalancedScheduler(SchedulingPolicy):
                             get_kv_cache_usage(f"http://{ip}/metrics") or 0.0
                             for ip in self.decode_instances
                         ]
-                        logger.debug(f" self.decode_kv_utils_counter: {self.decode_kv_utils_counter}, initial took {time.time() - start_time} second")
+                        logger.info(f" self.decode_kv_utils_counter: {self.decode_kv_utils_counter}, initial took {time.time() - start_time} second")
 
                     values = [self.decode_kv_utils_counter[i] for i in min_indices]
                     min_pos = 0
@@ -560,10 +560,9 @@ class LoadBalancedScheduler(SchedulingPolicy):
                         get_kv_cache_usage(f"http://{ip}/metrics") or 0.0
                         for ip in self.decode_instances
                     ]
-                    logger.debug(f"refresh self.decode_kv_utils_counter: {self.decode_kv_utils_counter}, initial took {time.time() - start_time} second")
-
-
-        
+                    logger.info(f"refresh self.decode_kv_utils_counter: {self.decode_kv_utils_counter}, initial took {time.time() - start_time} second")
+                    logger.warning(f"kv utils max-min={max(self.decode_kv_utils_counter)-min(self.decode_kv_utils_counter)}")
+ 
 class ProxyServer:
 
     def __init__(
