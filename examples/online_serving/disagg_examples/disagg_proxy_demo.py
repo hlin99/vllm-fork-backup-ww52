@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import threading
+import time
 from abc import ABC, abstractmethod
 from typing import Callable, Optional
 from datetime import datetime
@@ -18,17 +19,41 @@ from fastapi import (APIRouter, Depends, FastAPI, Header, HTTPException,
                      Request, status)
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from colorlog import ColoredFormatter
+
+handler = logging.StreamHandler()
+handler.setFormatter(ColoredFormatter(
+    "%(log_color)s[%(asctime)s] %(levelname)s - %(message)s",
+    datefmt='%Y-%m-%d %H:%M:%S',
+    log_colors={
+        'DEBUG':    'cyan',
+        'INFO':     'green',
+        'WARNING':  'yellow',
+        'ERROR':    'red',
+        'CRITICAL': 'bold_red',
+    }
+))
+
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
-logger = logging.getLogger()
-logging.basicConfig(level=logging.INFO)
+#logger = logging.getLogger()
+#logging.basicConfig(level=logging.INFO)
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+logger.addHandler(handler)
+logger.propagate = False
 
+from transformers import AutoTokenizer
 
 async def P_first_token_generator(generator_p, generator_d, callback_owner=None, prefill_instance:str=None, decode_instance:str=None):
     first_decode = True
     async for chunk in generator_p:
         yield chunk
-    print(f"P->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] prefill completed: ", prefill_instance)
+    #print(f"P->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] prefill completed: ", prefill_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
         callback_owner.on_done(prefill_instance=prefill_instance)
 
@@ -37,20 +62,20 @@ async def P_first_token_generator(generator_p, generator_d, callback_owner=None,
             first_decode = False
             continue
         yield chunk
-    print(f"P->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] decode completed: ", decode_instance)
+    #print(f"P->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] decode completed: ", decode_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
         callback_owner.on_done(decode_instance=decode_instance)
 
 async def D_first_token_generator(generator_p, generator_d, callback_owner=None, prefill_instance:str=None, decode_instance:str=None):
     async for _ in generator_p:
         continue
-    print(f"D->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] prefill completed: ", prefill_instance)
+    #print(f"D->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] prefill completed: ", prefill_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
         callback_owner.on_done(prefill_instance=prefill_instance)
 
     async for chunk in generator_d:
         yield chunk
-    print(f"D->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] decode completed: ", decode_instance)
+    #print(f"D->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] decode completed: ", decode_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
         callback_owner.on_done(decode_instance=decode_instance)
 
@@ -89,6 +114,7 @@ class Proxy:
         self.router = APIRouter()
         self.setup_routes()
         self.generator = P_first_token_generator if generator_on_p_node else D_first_token_generator
+        self.tokenizer = AutoTokenizer.from_pretrained(model)
 
     def on_done(self, prefill_instance:str=None, decode_instance:str=None):
         self.schedule_completion(prefill_instance, decode_instance)
@@ -284,12 +310,13 @@ class Proxy:
     async def create_completion(self, raw_request: Request):
         try:
             request = await raw_request.json()
-            
+
             if len(self.prefill_instances) > 0:
                 kv_prepare_request = request.copy()
                 kv_prepare_request["max_tokens"] = 1
                 
                 print("create_completion, request_len=", len(kv_prepare_request['prompt']))
+                print("create_completion, request_len tokenizer=", len(self.tokenizer(kv_prepare_request['prompt']).input_ids))
                 prefill_instance = self.schedule(self.prefill_cycler, request_len=len(kv_prepare_request['prompt']))
                 value = b''
                 try:
@@ -334,9 +361,13 @@ class Proxy:
             kv_prepare_request = request.copy()
             kv_prepare_request["max_tokens"] = 1
 
+            start_time = time.time()
             # prefill stage
-            total_length = sum(len(msg['content']) for msg in kv_prepare_request['messages'])
-            print("Total content length:", total_length)
+            total_length = sum(len(self.tokenizer(msg['content'])['input_ids']) for msg in kv_prepare_request['messages'])
+            end_time = time.time()
+            logger.info(f"Total content length: {total_length}")
+            logger.info(f"tokenizer took {(end_time - start_time) * 1000:.2f} ms")
+
             prefill_instance = self.schedule(self.prefill_cycler, request_len=total_length)
 
             value = b''
@@ -424,20 +455,21 @@ class LoadBalancedScheduler(SchedulingPolicy):
                 min_index = self.prefill_utils_counter.index(min_value)
                 self.prefill_bs_counter[min_index] += 1
                 self.prefill_utils_counter[min_index] += request_len
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] schedule prefill! scheduling prefill instance... min_value={min_value}, min_index={min_index}")
+                logger.info(f"<schedule prefill> instance = {min_index}, min_tokens = {min_value}")
                 return self.prefill_instances[min_index]
             else:
                 min_value = min(self.decode_bs_counter)
                 min_index = self.decode_bs_counter.index(min_value)
                 self.decode_bs_counter[min_index] += 1
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] schedule decode! scheduling decode instance... min_value={min_value}, min_index={min_index}")
+                logger.info(f"<schedule decode>  instance = {min_index}, min_batch = {min_value}")
                 return self.decode_instances[min_index]
 
     def schedule_completion(self, prefill_instance:str=None, decode_instance:str=None):
         with self.lock:
             if prefill_instance:
-                print(" LoadBalancedScheduler->schedule_completion prefill_instance =", prefill_instance)
                 index = self.prefill_instances.index(prefill_instance)
+                logger.info(f"<Prefill completed>  instance = {index}")
+
                 self.prefill_bs_counter[index] -= 1
                 all_zero = True
                 for index, _ in enumerate(self.prefill_instances):
@@ -445,15 +477,23 @@ class LoadBalancedScheduler(SchedulingPolicy):
                         all_zero = False
                         break
                 if all_zero:
-                    print("all bs is 0, clear entire entries")
+                    logger.warning(f"<Prefill in idle state>")
+
                     for index, _ in enumerate(self.prefill_instances):
                         self.prefill_utils_counter[index] = 0
 
             if decode_instance:
-                print(" LoadBalancedScheduler->schedule_completion decode_instance =", decode_instance)
                 index = self.decode_instances.index(decode_instance)
-                self.decode_bs_counter[index] -= 1
+                logger.info(f"<Decode completed>  instance = {index}")
 
+                self.decode_bs_counter[index] -= 1
+                all_zero = True
+                for index, _ in enumerate(self.decode_instances):
+                    if self.decode_bs_counter[index] != 0:
+                        all_zero = False
+                        break
+                if all_zero:
+                    logger.warning(f"<Decode in idle state>")
 
         
 class ProxyServer:
