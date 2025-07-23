@@ -455,7 +455,7 @@ def get_kv_cache_usage(metrics_url="http://localhost:8000/metrics"):
 
         model_name, value = matches[0]
         kv_usage_val = float(value)
-        kv_usage_val = round(kv_usage_val, 4)
+        kv_usage_val = round(kv_usage_val, 3)
 
         logger.info(f"KV Cache usage: {kv_usage_val}")
         return kv_usage_val
@@ -553,6 +553,15 @@ class LoadBalancedScheduler(SchedulingPolicy):
                         break
                 if all_zero:
                     logger.warning(f"<Decode in idle state>")
+                    self.decode_kv_utils_counter = [0] * len(self.decode_instances)
+                else:
+                    start_time = time.time()
+                    self.decode_kv_utils_counter = [
+                        get_kv_cache_usage(f"http://{ip}/metrics") or 0.0
+                        for ip in self.decode_instances
+                    ]
+                    logger.debug(f"refresh self.decode_kv_utils_counter: {self.decode_kv_utils_counter}, initial took {time.time() - start_time} second")
+
 
         
 class ProxyServer:
