@@ -316,8 +316,15 @@ class Proxy:
                 kv_prepare_request["max_tokens"] = 1
                 
                 print("create_completion, request_len=", len(kv_prepare_request['prompt']))
-                print("create_completion, request_len tokenizer=", len(self.tokenizer(kv_prepare_request['prompt']).input_ids))
-                prefill_instance = self.schedule(self.prefill_cycler, request_len=len(kv_prepare_request['prompt']))
+
+                start_time = time.time()
+                total_length = len(self.tokenizer(kv_prepare_request['prompt'])['input_ids'])
+                end_time = time.time()
+
+                logger.info(f"create_completion -- prompt length: {total_length}")
+                logger.info(f"tokenizer took {(end_time - start_time) * 1000:.2f} ms")
+
+                prefill_instance = self.schedule(self.prefill_cycler, request_len=total_length)
                 value = b''
                 try:
                     async for chunk in self.forward_request(
@@ -365,7 +372,7 @@ class Proxy:
             # prefill stage
             total_length = sum(len(self.tokenizer(msg['content'])['input_ids']) for msg in kv_prepare_request['messages'])
             end_time = time.time()
-            logger.info(f"Total content length: {total_length}")
+            logger.info(f"create_chat_completion -- prompt length: {total_length}")
             logger.info(f"tokenizer took {(end_time - start_time) * 1000:.2f} ms")
 
             prefill_instance = self.schedule(self.prefill_cycler, request_len=total_length)
