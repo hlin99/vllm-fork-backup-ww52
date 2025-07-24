@@ -48,7 +48,7 @@ env | grep VLLM_DECODE_BS
 env | grep VLLM_DECODE_BLOCK
 
 export VLLM_SKIP_WARMUP=True
-unset VLLM_SKIP_WARMUP
+#unset VLLM_SKIP_WARMUP
 export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww30_d_none_cont_pa,false,16384
 
 export VLLM_DP_SIZE=2
