@@ -49,13 +49,13 @@ logger.propagate = False
 
 from transformers import AutoTokenizer
 
-async def P_first_token_generator(generator_p, generator_d, callback_owner=None, prefill_instance:str=None, decode_instance:str=None):
+async def P_first_token_generator(generator_p, generator_d, callback_owner=None, prefill_instance:str=None, decode_instance:str=None, req_len:int=None):
     first_decode = True
     async for chunk in generator_p:
         yield chunk
     #print(f"P->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] prefill completed: ", prefill_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
-        callback_owner.on_done(prefill_instance=prefill_instance)
+        callback_owner.on_done(prefill_instance=prefill_instance, req_len=req_len)
 
     async for chunk in generator_d:
         if first_decode:
@@ -64,20 +64,20 @@ async def P_first_token_generator(generator_p, generator_d, callback_owner=None,
         yield chunk
     #print(f"P->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] decode completed: ", decode_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
-        callback_owner.on_done(decode_instance=decode_instance)
+        callback_owner.on_done(decode_instance=decode_instance, req_len=req_len)
 
-async def D_first_token_generator(generator_p, generator_d, callback_owner=None, prefill_instance:str=None, decode_instance:str=None):
+async def D_first_token_generator(generator_p, generator_d, callback_owner=None, prefill_instance:str=None, decode_instance:str=None, req_len:int=None):
     async for _ in generator_p:
         continue
     #print(f"D->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] prefill completed: ", prefill_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
-        callback_owner.on_done(prefill_instance=prefill_instance)
+        callback_owner.on_done(prefill_instance=prefill_instance, req_len=req_len)
 
     async for chunk in generator_d:
         yield chunk
     #print(f"D->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] decode completed: ", decode_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
-        callback_owner.on_done(decode_instance=decode_instance)
+        callback_owner.on_done(decode_instance=decode_instance, req_len=req_len)
 
 class SchedulingPolicy(ABC):
 
@@ -116,8 +116,8 @@ class Proxy:
         self.generator = P_first_token_generator if generator_on_p_node else D_first_token_generator
         self.tokenizer = AutoTokenizer.from_pretrained(model)
 
-    def on_done(self, prefill_instance:str=None, decode_instance:str=None):
-        self.schedule_completion(prefill_instance, decode_instance)
+    def on_done(self, prefill_instance:str=None, decode_instance:str=None, req_len:int=None):
+        self.schedule_completion(prefill_instance, decode_instance, req_len=req_len)
 
     def setup_routes(self):
         self.router.post(
@@ -292,11 +292,11 @@ class Proxy:
                 logger.error("Unexpected error: %s", str(e))
                 raise HTTPException(status_code=500, detail=str(e)) from e
 
-    def schedule(self, cycler: itertools.cycle, request_len: Optional[int] = None) -> str:
-        return self.scheduling_policy.schedule(cycler, request_len)
+    def schedule(self, cycler: itertools.cycle, is_prompt:int=None, request_len: Optional[int] = None) -> str:
+        return self.scheduling_policy.schedule(cycler, is_prompt, request_len)
 
-    def schedule_completion(self, prefill_instance:str=None, decode_instance:str=None):
-        self.scheduling_policy.schedule_completion(prefill_instance=prefill_instance, decode_instance=decode_instance)
+    def schedule_completion(self, prefill_instance:str=None, decode_instance:str=None, req_len:int=None):
+        self.scheduling_policy.schedule_completion(prefill_instance=prefill_instance, decode_instance=decode_instance, req_len=req_len)
 
     async def get_status(self):
         status = {
@@ -324,7 +324,7 @@ class Proxy:
                 logger.info(f"create_completion -- prompt length: {total_length}")
                 logger.info(f"tokenizer took {(end_time - start_time) * 1000:.2f} ms")
 
-                prefill_instance = self.schedule(self.prefill_cycler, request_len=total_length)
+                prefill_instance = self.schedule(self.prefill_cycler, is_prompt=True, request_len=total_length)
                 value = b''
                 try:
                     async for chunk in self.forward_request(
@@ -336,7 +336,7 @@ class Proxy:
                     raise http_exc
 
             # Perform kv recv and decoding stage
-            decode_instance = self.schedule(self.decode_cycler)
+            decode_instance = self.schedule(self.decode_cycler, is_prompt=False, request_len=total_length)
             value = value.strip().decode("utf-8").removesuffix("data: [DONE]").encode("utf-8")
             async def streaming_response(value):
                 if value:
@@ -350,7 +350,7 @@ class Proxy:
             except HTTPException as http_exc:
                 self.remove_instance_endpoint("decode", decode_instance)
                 raise http_exc
-            final_generator = self.generator(generator_p, generator_d, self, prefill_instance, decode_instance)    
+            final_generator = self.generator(generator_p, generator_d, self, prefill_instance, decode_instance, req_len=total_length)    
             response = StreamingResponse(final_generator)
             return response
         except Exception:
@@ -375,7 +375,7 @@ class Proxy:
             logger.info(f"create_chat_completion -- prompt length: {total_length}")
             logger.info(f"tokenizer took {(end_time - start_time) * 1000:.2f} ms")
 
-            prefill_instance = self.schedule(self.prefill_cycler, request_len=total_length)
+            prefill_instance = self.schedule(self.prefill_cycler, is_prompt=True, request_len=total_length)
 
             value = b''
             try:
@@ -387,7 +387,7 @@ class Proxy:
                 self.remove_instance_endpoint("prefill", prefill_instance)
                 raise http_exc
             # Perform kv recv and decoding stage
-            decode_instance = self.schedule(self.decode_cycler)
+            decode_instance = self.schedule(self.decode_cycler, is_prompt=False, request_len=total_length)
             value = value.strip().decode("utf-8").removesuffix("data: [DONE]").encode("utf-8")
             async def streaming_response(value):
                 if value:
@@ -402,7 +402,7 @@ class Proxy:
             except HTTPException as http_exc:
                 self.remove_instance_endpoint("decode", decode_instance)
                 raise http_exc
-            final_generator = self.generator(generator_p, generator_d, self, prefill_instance, decode_instance)
+            final_generator = self.generator(generator_p, generator_d, self, prefill_instance, decode_instance, req_len=total_length)
             response = StreamingResponse(final_generator)
             return response
         except Exception:
@@ -483,9 +483,9 @@ class LoadBalancedScheduler(SchedulingPolicy):
         print(" LoadBalancedScheduler, self.decode_instances =", self.decode_instances)
         super().__init__()
 
-    def schedule(self, cycler: itertools.cycle, request_len: Optional[int] = None) -> str:
+    def schedule(self, cycler: itertools.cycle, is_prompt:int=None, request_len: Optional[int] = None) -> str:
         with self.lock:
-            if request_len:
+            if is_prompt:
                 min_value = min(self.prefill_utils_counter)
                 min_index = self.prefill_utils_counter.index(min_value)
                 self.prefill_bs_counter[min_index] += 1
@@ -501,33 +501,39 @@ class LoadBalancedScheduler(SchedulingPolicy):
                 else:
                     min_indices = [i for i, val in enumerate(self.decode_bs_counter) if val == min_value]
                     logger.info(f"min_indices: {min_indices}")
-                    if all(x == 0 for x in self.decode_kv_utils_counter):    
-                        logger.warning(f"self.decode_kv_utils_counter is not initialized, start initializing....")
-                        start_time = time.time()
-                        self.decode_kv_utils_counter = [
-                            get_kv_cache_usage(f"http://{ip}/metrics") or 0.0
-                            for ip in self.decode_instances
-                        ]
-                        logger.info(f" self.decode_kv_utils_counter: {self.decode_kv_utils_counter}, initial took {time.time() - start_time} second")
+                    #if all(x == 0 for x in self.decode_kv_utils_counter):    
+                    #    logger.warning(f"self.decode_kv_utils_counter is not initialized, start initializing....")
+                    #    start_time = time.time()
+                    #    self.decode_kv_utils_counter = [
+                    #        get_kv_cache_usage(f"http://{ip}/metrics") or 0.0
+                    #        for ip in self.decode_instances
+                    #    ]
+                    #    logger.info(f" self.decode_kv_utils_counter: {self.decode_kv_utils_counter}, initial took {time.time() - start_time} second")
 
-                    values = [self.decode_kv_utils_counter[i] for i in min_indices]
-                    min_pos = 0
-                    min_val = values[0]
-                    for idx, val in enumerate(values):
-                        if val < min_val:
-                            min_val = val
-                            min_pos = idx
-                    min_index = min_indices[min_pos]
+                    #values = [self.decode_kv_utils_counter[i] for i in min_indices]
+                    #min_pos = 0
+                    #min_val = values[0]
+                    #for idx, val in enumerate(values):
+                    #    if val < min_val:
+                    #        min_val = val
+                    #        min_pos = idx
+                    #min_index = min_indices[min_pos]
+                    min_index = min(min_indices, key=lambda i: self.decode_kv_utils_counter[i])
 
                 self.decode_bs_counter[min_index] += 1
+                self.decode_kv_utils_counter[min_index] += request_len
+
                 logger.info(f"<schedule decode>  instance = {min_index}, min_batch = {min_value}")
+                logger.info(f"<schedule decode>  decode_kv_utils_counter: {self.decode_kv_utils_counter}")
+
                 return self.decode_instances[min_index]
 
-    def schedule_completion(self, prefill_instance:str=None, decode_instance:str=None):
+    def schedule_completion(self, prefill_instance:str=None, decode_instance:str=None, req_len:int=None):
+        print(" schedule_completion , req_len=", req_len)
         with self.lock:
             if prefill_instance:
                 index = self.prefill_instances.index(prefill_instance)
-                logger.info(f"<Prefill completed>  instance = {index}")
+                logger.info(f"<Prefill completed>  instance = {index}, req_len={req_len}")
 
                 self.prefill_bs_counter[index] -= 1
                 all_zero = True
@@ -540,10 +546,13 @@ class LoadBalancedScheduler(SchedulingPolicy):
 
                     for index, _ in enumerate(self.prefill_instances):
                         self.prefill_utils_counter[index] = 0
+                else:
+                    index = self.prefill_instances.index(prefill_instance)
+                    self.prefill_utils_counter[index] -= req_len
 
             if decode_instance:
                 index = self.decode_instances.index(decode_instance)
-                logger.info(f"<Decode completed>  instance = {index}")
+                logger.info(f"<Decode completed>  instance = {index}, req_len={req_len}")
 
                 self.decode_bs_counter[index] -= 1
                 all_zero = True
@@ -555,13 +564,16 @@ class LoadBalancedScheduler(SchedulingPolicy):
                     logger.warning(f"<Decode in idle state>")
                     self.decode_kv_utils_counter = [0] * len(self.decode_instances)
                 else:
-                    start_time = time.time()
-                    self.decode_kv_utils_counter = [
-                        get_kv_cache_usage(f"http://{ip}/metrics") or 0.0
-                        for ip in self.decode_instances
-                    ]
-                    logger.info(f"refresh self.decode_kv_utils_counter: {self.decode_kv_utils_counter}, initial took {time.time() - start_time} second")
-                    logger.warning(f"kv utils max-min={max(self.decode_kv_utils_counter)-min(self.decode_kv_utils_counter)}")
+                    #start_time = time.time()
+                    #self.decode_kv_utils_counter = [
+                    #    get_kv_cache_usage(f"http://{ip}/metrics") or 0.0
+                    #    for ip in self.decode_instances
+                    #]
+                    #logger.info(f"refresh self.decode_kv_utils_counter: {self.decode_kv_utils_counter}, initial took {time.time() - start_time} second")
+                    #logger.warning(f"kv utils max-min={max(self.decode_kv_utils_counter)-min(self.decode_kv_utils_counter)}")
+                    index = self.decode_instances.index(decode_instance)
+                    self.decode_kv_utils_counter[index] -= req_len
+                    logger.info(f"<schedule_completion decode>  decode_kv_utils_counter: {self.decode_kv_utils_counter}")
  
 class ProxyServer:
 
