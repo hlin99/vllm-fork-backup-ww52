@@ -481,6 +481,11 @@ class LoadBalancedScheduler(SchedulingPolicy):
         print(" LoadBalancedScheduler, prefill/decode instance is = ", len(self.prefill_bs_counter), len(self.decode_bs_counter))
         print(" LoadBalancedScheduler, self.prefill_instances =", self.prefill_instances)
         print(" LoadBalancedScheduler, self.decode_instances =", self.decode_instances)
+        self.prefill_schedule_index = 0
+        self.prefill_schedule_completion_index = 0
+        self.decode_schedule_index = 0
+        self.decode_schedule_completion_index = 0
+
         super().__init__()
 
     def schedule(self, cycler: itertools.cycle, is_prompt:int=None, request_len: Optional[int] = None) -> str:
@@ -490,7 +495,10 @@ class LoadBalancedScheduler(SchedulingPolicy):
                 min_index = self.prefill_utils_counter.index(min_value)
                 self.prefill_bs_counter[min_index] += 1
                 self.prefill_utils_counter[min_index] += request_len
-                logger.info(f"<schedule prefill> instance = {min_index}, min_tokens = {min_value}")
+                self.prefill_schedule_index += 1
+
+                logger.info(f"<schedule prefill {self.prefill_schedule_index}> instance = {min_index}, min_tokens = {min_value}")
+                
                 return self.prefill_instances[min_index]
             else:
                 min_value = min(self.decode_bs_counter)
@@ -522,18 +530,18 @@ class LoadBalancedScheduler(SchedulingPolicy):
 
                 self.decode_bs_counter[min_index] += 1
                 self.decode_kv_utils_counter[min_index] += request_len
-
-                logger.info(f"<schedule decode>  instance = {min_index}, min_batch = {min_value}")
+                self.decode_schedule_index += 1
+                logger.info(f"<schedule decode {self.decode_schedule_index}>  instance = {min_index}, min_batch = {min_value}")
                 logger.info(f"<schedule decode>  decode_kv_utils_counter: {self.decode_kv_utils_counter}")
 
                 return self.decode_instances[min_index]
 
     def schedule_completion(self, prefill_instance:str=None, decode_instance:str=None, req_len:int=None):
-        print(" schedule_completion , req_len=", req_len)
         with self.lock:
             if prefill_instance:
                 index = self.prefill_instances.index(prefill_instance)
-                logger.info(f"<Prefill completed>  instance = {index}, req_len={req_len}")
+                self.prefill_schedule_completion_index += 1
+                logger.info(f"<Prefill completed {self.prefill_schedule_completion_index}>  instance = {index}, req_len={req_len}")
 
                 self.prefill_bs_counter[index] -= 1
                 all_zero = True
@@ -552,7 +560,8 @@ class LoadBalancedScheduler(SchedulingPolicy):
 
             if decode_instance:
                 index = self.decode_instances.index(decode_instance)
-                logger.info(f"<Decode completed>  instance = {index}, req_len={req_len}")
+                self.decode_schedule_completion_index += 1
+                logger.info(f"<Decode completed {self.decode_schedule_completion_index}>  instance = {index}, req_len={req_len}")
 
                 self.decode_bs_counter[index] -= 1
                 all_zero = True
