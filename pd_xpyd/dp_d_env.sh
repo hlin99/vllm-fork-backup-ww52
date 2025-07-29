@@ -18,7 +18,7 @@ export VLLM_DELAYED_SAMPLING="true"
 # params
 model_len=8192
 max_num_batched_tokens=8192
-max_num_seqs=32
+max_num_seqs=64
 input_min=128
 input_max=8192
 output_max=8192
@@ -50,6 +50,7 @@ env | grep VLLM_DECODE_BLOCK
 
 export VLLM_SKIP_WARMUP=True
 #unset VLLM_SKIP_WARMUP
+export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww31_INC_d,false,32768
 
 export VLLM_DP_SIZE=2
 export VLLM_USE_V1=0
