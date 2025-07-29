@@ -5,8 +5,8 @@
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/dp_d_env.sh
 
-export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_$1.json
-echo "MOONCAKE_CONFIG_PATH=$MOONCAKE_CONFIG_PATH"
+#export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_$1.json
+#echo "MOONCAKE_CONFIG_PATH=$MOONCAKE_CONFIG_PATH"
 
 EP_SIZE=$2
 echo "EP_SIZE=$EP_SIZE"
