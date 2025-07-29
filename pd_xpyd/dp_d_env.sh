@@ -6,6 +6,7 @@ source "$BASH_DIR"/pd_env.sh
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 
 model_path=/mnt/disk2/hf_models/DeepSeek-R1-BF16-w8afp8-static-no-ste-G2/
+model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2/
 
 export VLLM_GPU_MEMORY_UTILIZATION=0.9
 export VLLM_GRAPH_RESERVED_MEM=0.2
@@ -57,4 +58,10 @@ export VLLM_DP_MASTER_PORT=25940
 export VLLM_EP_SIZE=16
 
 export PT_HPU_MOE_THRESHOLD=64
+
+#FOR INC PF8 PATH
+export QUANT_CONFIG="$BASH_DIR"/inc_fp8_tp1ep16.json
+export VLLM_REQUANT_FP8_INC=1
+export VLLM_ENABLE_RUNTIME_DEQUANT=1
+export VLLM_MOE_N_SLICE=1
 
