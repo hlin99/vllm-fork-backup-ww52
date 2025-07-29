@@ -50,7 +50,7 @@ env | grep VLLM_DECODE_BLOCK
 
 export VLLM_SKIP_WARMUP=True
 #unset VLLM_SKIP_WARMUP
-export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww31_INC_d,false,32768
+#export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww31_INC_d,false,32768
 
 export VLLM_DP_SIZE=2
 export VLLM_USE_V1=0
@@ -65,4 +65,5 @@ export QUANT_CONFIG="$BASH_DIR"/inc_fp8_tp1ep16.json
 export VLLM_REQUANT_FP8_INC=1
 export VLLM_ENABLE_RUNTIME_DEQUANT=1
 export VLLM_MOE_N_SLICE=1
+export VLLM_HPU_MARK_SCALES_AS_CONST=false
 

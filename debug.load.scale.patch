@@ -1,0 +1,20 @@
+diff --git a/neural_compressor/torch/algorithms/fp8_quant/_core/quantize.py b/neural_compressor/torch/algorithms/fp8_quant/_core/quantize.py
+index 91e61105eb..bbee89a27e 100644
+--- a/neural_compressor/torch/algorithms/fp8_quant/_core/quantize.py
++++ b/neural_compressor/torch/algorithms/fp8_quant/_core/quantize.py
+@@ -159,6 +159,8 @@ def prepare_model(model, mod_list, measurement, scale_file, scale_method_config,
+                 # TODO [SW-217813]: support dynamic quantization in all ops and remove should_quantize_cond
+                 if should_quantize_cond:
+                     scale_method_config_node = find_node_scale_method_config(scale_method_config, name, mod_type_str)
++                    logger.warning(f"load scale for {name},")
++                    logger.warning(f"mod: {mod}")
+                     mod_extra_config, save_file = load_layer_scales(mod, name, config,
+                                                                 mod_type_str, measurement,
+                                                                 scales, scale_file,
+@@ -271,4 +273,4 @@ def quantize(model, mod_list):
+                                CfgStr.WEIGHT: ScaleMethodConfig(scale_value_type=ScaleValueType.DUMMY_SCALES)}
+         prepare_model_with_dummy_measurement(model, mod_list, scale_method_config, scale_config)
+     else:
+-        raise Exception("unexpected mode, expected QuantMode.QUANTIZE or QuantMode.LOAD")
+\ No newline at end of file
++        raise Exception("unexpected mode, expected QuantMode.QUANTIZE or QuantMode.LOAD")
