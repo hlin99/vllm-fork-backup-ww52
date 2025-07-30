@@ -5,8 +5,8 @@
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/dp_d_env.sh
 
-#export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_$1.json
-#echo "MOONCAKE_CONFIG_PATH=$MOONCAKE_CONFIG_PATH"
+export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_$1.json
+echo "MOONCAKE_CONFIG_PATH=$MOONCAKE_CONFIG_PATH"
 
 EP_SIZE=$2
 echo "EP_SIZE=$EP_SIZE"
@@ -56,6 +56,7 @@ do
     --use-v2-block-manager
     --distributed_executor_backend mp
     --kv-cache-dtype fp8_inc
+    --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}'
   )
 
   if [ "$DP_RANK" -ne 1 ]; then
