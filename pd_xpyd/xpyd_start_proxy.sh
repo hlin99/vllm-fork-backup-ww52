@@ -1,5 +1,5 @@
 #set +x
-export MODEL_PATH=/mnt/disk2/hf_models/DeepSeek-R1-BF16-w8afp8-static-no-ste-G2/
+export MODEL_PATH=/mnt/disk2/hf_models/DeepSeek-R1-G2/
 
 if [ -z "$1" ]; then
     echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D"
@@ -51,6 +51,8 @@ fi
 
 #For OAM
 DECODE_IPS=("10.239.129.81" "10.239.129.165" "10.239.129.67" "10.239.129.21")
+DECODE_IPS=("10.239.129.67" "10.239.129.21")
+
 #For PCIE
 # DECODE_IPS=("10.112.110.161" "10.112.110.148")
 
