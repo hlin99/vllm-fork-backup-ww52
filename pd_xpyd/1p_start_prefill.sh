@@ -13,7 +13,7 @@ else
     echo " Normal mode enabled"
 fi
 
-if [ -z "$1" ] || [ "$1" == "g10" ] || [ "$1" == "pcie4" ]; then
+if [ -z "$1" ] || [ "$1" == "g3" ] || [ "$1" == "pcie4" ]; then
     if [ "$BENCHMARK_MODE" == "1" ]; then
 	source "$BASH_DIR"/start_etc_mooncake_master.sh benchmark
 	echo "source "$BASH_DIR"/start_etc_mooncake_master.sh benchmark"

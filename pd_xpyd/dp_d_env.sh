@@ -17,7 +17,7 @@ export VLLM_DELAYED_SAMPLING="true"
 # params
 model_len=8192
 max_num_batched_tokens=8192
-max_num_seqs=32
+max_num_seqs=64
 input_min=128
 input_max=8192
 output_max=8192
