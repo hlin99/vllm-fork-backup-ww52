@@ -345,8 +345,9 @@ class Proxy:
                 kv_prepare_request["max_tokens"] = 1
 
                 start_time = time.time()
-                total_length = len(
-                    self.tokenizer(kv_prepare_request['prompt'])['input_ids'])
+                total_length = 100
+                #total_length = len(
+                #    self.tokenizer(kv_prepare_request['prompt'])['input_ids'])
                 end_time = time.time()
 
                 log_info_green(
@@ -411,10 +412,11 @@ class Proxy:
             kv_prepare_request["max_tokens"] = 1
 
             start_time = time.time()
+            total_length = 100
             # prefill stage
-            total_length = sum(
-                len(self.tokenizer(msg['content'])['input_ids'])
-                for msg in kv_prepare_request['messages'])
+            # total_length = sum(
+            #    len(self.tokenizer(msg['content'])['input_ids'])
+            #    for msg in kv_prepare_request['messages'])
             end_time = time.time()
             log_info_green(
                 f"create_chat_completion -- prompt length: {total_length}, "
