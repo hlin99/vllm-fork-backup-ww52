@@ -8,16 +8,16 @@ export VLLM_EP_SIZE=8
 
 model_path=/mnt/disk2/hf_models/DeepSeek-R1-BF16-w8afp8-static-no-ste-G2/
 
-export VLLM_GPU_MEMORY_UTILIZATION=0.8
+export VLLM_GPU_MEMORY_UTILIZATION=0.6
 export VLLM_GRAPH_RESERVED_MEM=0.1
 export VLLM_GRAPH_PROMPT_RATIO=1
 # params
-model_len=16384
-max_num_batched_tokens=16384
-max_num_seqs=512
+model_len=32768
+max_num_batched_tokens=32768
+max_num_seqs=16
 input_min=128
-input_max=16384
-output_max=16384
+input_max=32768
+output_max=32768
 
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
 unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX
