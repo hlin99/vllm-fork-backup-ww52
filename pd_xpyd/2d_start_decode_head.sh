@@ -22,4 +22,4 @@ while true; do
     fi
 done
 
-python3 -m vllm.entrypoints.openai.api_server --model $model_path --port 8200 --max-model-len $model_len --gpu-memory-utilization $VLLM_GPU_MEMORY_UTILIZATION -tp 16 --max-num-seqs $max_num_seqs --trust-remote-code --kv-cache-dtype fp8_inc --disable-log-requests --max-num-batched-tokens $max_num_batched_tokens --use-padding-aware-scheduling --use-v2-block-manager --distributed_executor_backend ray --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}'
+python3 -m vllm.entrypoints.openai.api_server --model $model_path --port 8200 --max-model-len $model_len --gpu-memory-utilization $VLLM_GPU_MEMORY_UTILIZATION -tp 16 --max-num-seqs $max_num_seqs --trust-remote-code --disable-log-requests --max-num-batched-tokens $max_num_batched_tokens --use-padding-aware-scheduling --use-v2-block-manager --distributed_executor_backend ray --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}'

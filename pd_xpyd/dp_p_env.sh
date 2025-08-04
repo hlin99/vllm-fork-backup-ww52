@@ -12,12 +12,12 @@ export VLLM_GPU_MEMORY_UTILIZATION=0.8
 export VLLM_GRAPH_RESERVED_MEM=0.1
 export VLLM_GRAPH_PROMPT_RATIO=1
 # params
-model_len=16384
-max_num_batched_tokens=16384
-max_num_seqs=512
+model_len=8192
+max_num_batched_tokens=8192
+max_num_seqs=8
 input_min=128
-input_max=16384
-output_max=16384
+input_max=8192
+output_max=8192
 
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
 unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX
@@ -25,6 +25,8 @@ unset VLLM_DECODE_BS_BUCKET_MIN VLLM_DECODE_BS_BUCKET_STEP VLLM_DECODE_BS_BUCKET
 unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLOCK_BUCKET_MAX
 
 set_bucketing
+
+export VLLM_PROMPT_SEQ_BUCKET_STEP=1024
 
 export VLLM_DECODE_BS_BUCKET_MIN=1
 export VLLM_DECODE_BS_BUCKET_STEP=1
@@ -44,7 +46,7 @@ export VLLM_SKIP_WARMUP=True
 export VLLM_DP_SIZE=1
 export VLLM_USE_V1=0
 
-#unset VLLM_SKIP_WARMUP
-#export PT_HPU_RECIPE_CACHE_CONFIG=./_prefill_cache,false,16384
+unset VLLM_SKIP_WARMUP
+export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww32_bf16_p,false,16384
 
 #python3 -m vllm.entrypoints.openai.api_server --model $model_path --port 8100 --max-model-len $model_len --gpu-memory-utilization $VLLM_GPU_MEMORY_UTILIZATION -tp 16  --max-num-seqs $max_num_seqs --trust-remote-code --disable-async-output-proc --kv-cache-dtype fp8_inc --disable-log-requests --max-num-batched-tokens $max_num_batched_tokens --use-padding-aware-scheduling --use-v2-block-manager --distributed_executor_backend ray --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}'
