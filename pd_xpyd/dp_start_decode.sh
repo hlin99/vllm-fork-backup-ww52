@@ -5,6 +5,11 @@
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/dp_d_env.sh
 
+timestamp=$(date +"%Y%m%d_%H%M%S")
+log_dir="xpyd_logs"
+mkdir -p "$log_dir"
+log_file="$log_dir/log_rank${RANK}_${timestamp}.log"
+
 export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_$1.json
 echo "MOONCAKE_CONFIG_PATH=$MOONCAKE_CONFIG_PATH"
 
@@ -69,7 +74,7 @@ do
 
   if [ "$DP_RANK" -ne 1 ]; then
     echo "env VLLM_DP_RANK=$RANK ${CMD[*]}"
-    env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${CMD[@]}" &
+    env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${CMD[@]}" 2>&1 | tee "$log_file" &
   else
     echo "${CMD[*]}"
     "${CMD[@]}" &
