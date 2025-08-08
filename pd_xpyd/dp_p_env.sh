@@ -6,16 +6,16 @@ source "$BASH_DIR"/pd_env.sh
 
 export VLLM_EP_SIZE=8
 
-export VLLM_GPU_MEMORY_UTILIZATION=0.8
+export VLLM_GPU_MEMORY_UTILIZATION=0.5
 export VLLM_GRAPH_RESERVED_MEM=0.1
 export VLLM_GRAPH_PROMPT_RATIO=1
 # params
-model_len=16384
-max_num_batched_tokens=16384
-max_num_seqs=512
+model_len=46080
+max_num_batched_tokens=46080
+max_num_seqs=8
 input_min=128
-input_max=16384
-output_max=16384
+input_max=46080
+output_max=46080
 
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
 unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX
