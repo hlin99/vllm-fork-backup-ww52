@@ -238,15 +238,11 @@ async def async_request_openai_completions(
     ), "OpenAI Completions API URL must end with 'completions' or 'profile'."
 
     async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
-        print("!@##@$%@#$%@#$%@#$%@#%$")
         payload = {
             "model": request_func_input.model_name \
                 if request_func_input.model_name else request_func_input.model,
             "prompt": request_func_input.prompt,
-            #"temperature": 0.0,
-            "temperature": 0.3,
-            "top_p": 1.0,
-            "top_k": 5,
+            "temperature": 0.0,
             "best_of": request_func_input.best_of,
             "max_tokens": request_func_input.output_len,
             "logprobs": request_func_input.logprobs,
