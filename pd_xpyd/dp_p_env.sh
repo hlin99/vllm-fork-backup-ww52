@@ -12,7 +12,7 @@ export VLLM_GRAPH_PROMPT_RATIO=1
 # params
 model_len=4096
 max_num_batched_tokens=8192
-max_num_seqs=4
+max_num_seqs=8
 input_min=1536
 input_max=2048
 output_max=1024
