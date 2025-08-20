@@ -71,10 +71,15 @@ do
     --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}'
   )
   log_file="$log_dir/log_rank${RANK}_${timestamp}.log"
+  
+  extra_env=()
+  if [ "$i" -eq 0 ] && [ "$RANK" -eq 0 ]; then
+    extra_env+=(VLLM_PROFILER_ENABLED=true)
+  fi
 
   if [ "$DP_RANK" -ne 1 ]; then
     echo "env VLLM_DP_RANK=$RANK ${CMD[*]}"
-    env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${CMD[@]}" 2>&1 | tee "$log_file" &
+    env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${extra_env[@]}" "${CMD[@]}" 2>&1 | tee "$log_file" &
   else
     echo "${CMD[*]}"
     "${CMD[@]}" &
