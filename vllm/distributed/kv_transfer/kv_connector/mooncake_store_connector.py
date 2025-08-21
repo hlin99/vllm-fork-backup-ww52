@@ -572,7 +572,7 @@ class MooncakeStoreConnector(KVConnectorBase):
                 sampler_output_of_seq_group)
 
             self.kv_store.put_bytes(sampler_output_key, sampler_output_bytes)
-            logger.debug("Put sampler output: %s, time: %s",
+            print("Put sampler output: %s, time: %s",
                          sampler_output_key,
                          time.time() - start_time)
 
@@ -588,14 +588,14 @@ class MooncakeStoreConnector(KVConnectorBase):
             sampler_output_key = self.get_sampler_output_key(
                 seq_group_to_sample)
             if not self.wait_for_key(sampler_output_key, 10):
-                logger.warning(
+                print(
                     "Sampler output with key: %s is not ready in 10 seconds",
                     sampler_output_key)
                 return None
 
             sampler_output_bytes = self.kv_store.get_bytes(sampler_output_key)
             if not sampler_output_bytes:
-                logger.warning("Sampler output with key: %s doesn't exist",
+                print("Sampler output with key: %s doesn't exist",
                                sampler_output_key)
                 return None
 
@@ -603,7 +603,7 @@ class MooncakeStoreConnector(KVConnectorBase):
             sampler_output = self.sampler_output_decoder.decode(
                 sampler_output_bytes)
             outputs.append(sampler_output)
-            logger.debug("Get sampler output: %s, time: %s",
+            print("Get sampler output: %s, time: %s",
                          sampler_output_key,
                          time.time() - start_time)
 

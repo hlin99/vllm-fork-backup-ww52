@@ -73,9 +73,9 @@ do
   log_file="$log_dir/log_rank${RANK}_${timestamp}.log"
   
   extra_env=()
-  if [ "$i" -eq 0 ] && [ "$RANK" -eq 0 ]; then
-    extra_env+=(VLLM_PROFILER_ENABLED=true)
-  fi
+#  if [ "$i" -eq 0 ] && [ "$RANK" -eq 0 ]; then
+#    extra_env+=(VLLM_PROFILER_ENABLED=full)
+#  fi
 
   if [ "$DP_RANK" -ne 1 ]; then
     echo "env VLLM_DP_RANK=$RANK ${CMD[*]}"
