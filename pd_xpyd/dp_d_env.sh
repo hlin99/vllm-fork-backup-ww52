@@ -50,9 +50,9 @@ env | grep VLLM_DECODE_BS
 env | grep VLLM_DECODE_BLOCK
 
 export VLLM_SKIP_WARMUP=True
-unset VLLM_SKIP_WARMUP
+#unset VLLM_SKIP_WARMUP
 
-export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww34_bf16_d,false,327680
+export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/yanli_ww34_bf16_d,false,327680
 
 export VLLM_DP_SIZE=2
 export VLLM_USE_V1=0
