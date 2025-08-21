@@ -16,9 +16,9 @@ export VLLM_DELAYED_SAMPLING="true"
 model_len=8192
 max_num_batched_tokens=8192
 max_num_seqs=48
-input_min=1536
+input_min=128
 input_max=2048
-output_max=1024
+output_max=2048
 
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
 unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX
@@ -46,7 +46,7 @@ env | grep VLLM_DECODE_BS
 env | grep VLLM_DECODE_BLOCK
 
 export VLLM_SKIP_WARMUP=True
-#unset VLLM_SKIP_WARMUP
+unset VLLM_SKIP_WARMUP
 export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww33_inc_fp8_d,false,131072
 
 export VLLM_DP_SIZE=2
