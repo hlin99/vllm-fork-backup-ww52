@@ -30,7 +30,7 @@ import aiohttp
 import requests
 import uvicorn
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, status
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, PlainTextResponse
 
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
 logger = logging.getLogger()
@@ -92,6 +92,150 @@ class Proxy:
         self.router.post(
             "/instances/add", dependencies=[Depends(self.api_key_authenticate)]
         )(self.add_instance_endpoint)
+        self.router.get("/health", response_class=PlainTextResponse)(self.get_health)
+        self.router.get("/ping", response_class=PlainTextResponse)(self.get_ping)
+        self.router.post("/ping", response_class=PlainTextResponse)(self.get_ping)
+        self.router.post("/tokenize", response_class=JSONResponse)(self.post_tokenize)
+        self.router.post("/detokenize", response_class=JSONResponse)(self.post_detokenize)
+        self.router.get("/v1/models", response_class=JSONResponse)(self.get_models)
+        self.router.get("/version", response_class=JSONResponse)(self.get_version)
+
+    async def get_version(self):
+        url = f"http://{self.prefill_instances[0]}/version"
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(url) as resp:
+                    # ▒~]▒~U解▒~^~P JSON
+                    try:
+                        data = await resp.json()
+                    except aiohttp.ContentTypeError:
+                        text = await resp.text()
+                        data = {"error": f"Expected JSON, got: {text}"}
+                    return JSONResponse(content=data, status_code=resp.status)
+            except Exception as e:
+                return JSONResponse(
+                    content={"error": f"Failed to fetch {url}: {str(e)}"},
+                    status_code=500
+                )
+
+    async def get_models(self):
+        # 取第一个 prefill instance 转发请求
+        url = f"http://{self.prefill_instances[0]}/v1/models"
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(url) as resp:
+                    # 尝试解析 JSON
+                    try:
+                        data = await resp.json()
+                    except aiohttp.ContentTypeError:
+                        text = await resp.text()
+                        data = {"error": f"Expected JSON, got: {text}"}
+                    return JSONResponse(content=data, status_code=resp.status)
+            except Exception as e:
+                return JSONResponse(
+                    content={"error": f"Failed to fetch {url}: {str(e)}"},
+                    status_code=500
+                )
+
+    async def post_detokenize(self, request: Request):
+        body = await request.json()
+        model = body.get("model")
+        tokens = body.get("tokens")
+
+        if not model or not tokens:
+            return JSONResponse(
+                {"error": "Missing required fields: 'model' and 'tokens'"},
+                status_code=400
+            )
+
+        url = f"http://{self.prefill_instances[0]}/detokenize"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json={"model": model, "tokens": tokens}) as resp:
+                    content = await resp.json()
+                    return JSONResponse(content)
+        except Exception as e:
+            return JSONResponse(
+                {"error": f"Failed to fetch {url}, reason: {str(e)}"},
+                status_code=500
+            )
+
+    async def post_tokenize(self, request: Request):
+        body = await request.json()
+        model = body.get("model")
+        prompt = body.get("prompt")
+
+        if not model or not prompt:
+            return JSONResponse(
+                {"error": "Missing required fields: 'model' and 'prompt'"},
+                status_code=400
+            )
+
+        url = f"http://{self.prefill_instances[0]}/tokenize"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json={"model": model, "prompt": prompt}) as resp:
+                    content = await resp.json()
+                    return JSONResponse(content)
+        except Exception as e:
+            return JSONResponse(
+                {"error": f"Failed to fetch {url}, reason: {str(e)}"},
+                status_code=500
+            )
+
+    async def get_health(self):
+        print("endpint: /health")
+        results = []
+
+        async def check_instance(instance):
+            url = f"http://{instance}/health"
+            async with aiohttp.ClientSession() as session:
+                try:
+                    async with session.get(url) as resp:
+                        text = await resp.text()
+                        status = resp.status
+                        if status != 200:
+                            return f"{instance}: ERROR {status} - {text}"
+                        return f"{instance}: OK - {text}"
+                except Exception as e:
+                    return f"{instance}: EXCEPTION - {str(e)}"
+
+        # 轮询 prefill_instances
+        for instance in self.prefill_instances:
+            results.append(await check_instance(instance))
+
+        # 轮询 decode_instances
+        for instance in self.decode_instances:
+            results.append(await check_instance(instance))
+
+        return PlainTextResponse(content="\n".join(results))
+
+    async def get_ping(self):
+        print("endpint: /ping")
+        results = []
+
+        async def check_instance(instance):
+            url = f"http://{instance}/ping"
+            async with aiohttp.ClientSession() as session:
+                try:
+                    async with session.get(url) as resp:
+                        text = await resp.text()
+                        status = resp.status
+                        if status != 200:
+                            return f"{instance}: ERROR {status} - {text}"
+                        return f"{instance}: OK - {text}"
+                except Exception as e:
+                    return f"{instance}: EXCEPTION - {str(e)}"
+
+        # 轮询 prefill_instances
+        for instance in self.prefill_instances:
+            results.append(await check_instance(instance))
+
+        # 轮询 decode_instances
+        for instance in self.decode_instances:
+            results.append(await check_instance(instance))
+
+        return PlainTextResponse(content="\n".join(results))
 
     async def validate_json_request(self, raw_request: Request):
         content_type = raw_request.headers.get("content-type", "").lower()
