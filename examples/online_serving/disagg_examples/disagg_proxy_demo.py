@@ -414,7 +414,7 @@ class Proxy:
                                              decode_instance,
                                              req_len=total_length)
             response = StreamingResponse(final_generator,
-                                         media_type="application/json")
+                                         media_type="text/event-stream")
             return response
         except Exception:
             import sys
@@ -483,7 +483,7 @@ class Proxy:
                                              decode_instance,
                                              req_len=total_length)
             response = StreamingResponse(final_generator,
-                                         media_type="application/json")
+                                         media_type="text/event-stream")
             return response
         except Exception:
             exc_info = sys.exc_info()
@@ -491,7 +491,7 @@ class Proxy:
             print("Error occurred in disagg proxy server")
             print(error_messages)
             return StreamingResponse(content=iter(error_messages),
-                                     media_type="application/json")
+                                     media_type="text/event-stream")
 
     def remove_instance_endpoint(self, instance_type, instance):
         with self.scheduling_policy.lock:
