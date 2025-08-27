@@ -413,8 +413,9 @@ class Proxy:
                                              prefill_instance,
                                              decode_instance,
                                              req_len=total_length)
+            media_type = "text/event-stream" if request.get("stream", False) else "application/json"
             response = StreamingResponse(final_generator,
-                                         media_type="application/json")
+                                         media_type=media_type)
             return response
         except Exception:
             import sys
@@ -482,8 +483,9 @@ class Proxy:
                                              prefill_instance,
                                              decode_instance,
                                              req_len=total_length)
+            media_type = "text/event-stream" if request.get("stream", False) else "application/json"
             response = StreamingResponse(final_generator,
-                                         media_type="application/json")
+                                         media_type=media_type)
             return response
         except Exception:
             exc_info = sys.exc_info()
