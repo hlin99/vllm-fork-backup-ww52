@@ -297,7 +297,7 @@ source dp1_xp2d_start_decode.sh
 使用以下命令启动PD proxy服务器
 ```bash
 cd /ws/vllm-fork
-bash pd_xpyd/xpyd_start_proxy.sh 1 2 1 false
+bash pd_xpyd/xpyd_start_proxy.sh 1 2
 ```
 
 ### 验证
