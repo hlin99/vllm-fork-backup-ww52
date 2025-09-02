@@ -113,6 +113,7 @@ class VllmMixtureOfExpertsOpFP8(torch.nn.Module):
                 if tokens_num <= threshold:
                     chunk_size = self.chunk_size_list[idx]
                     break
+            print("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$4 tokens_num, chunk_size=", tokens_num, chunk_size)
             kwargs = {
                 "chunk_size": chunk_size,
                 "total_experts": self.global_num_experts,
