@@ -3180,15 +3180,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             hidden_states_list,
                         )
 
-                    if get_world_group().rank == 0:
-                        # send only on rank 0, avoid fetching for others
-                        cur_time = time.time()
-                        if self.use_async_kv_transfer_in_pd:
-                            async_send_kv_caches(hidden_states)
-                        else:
-                            sync_send_kv_caches(hidden_states)
-                        now = time.time()
-                        logger.debug("KV send time: %f s", now - cur_time)
+                    cur_time = time.time()
+                    if self.use_async_kv_transfer_in_pd:
+                        async_send_kv_caches(hidden_states)
+                    else:
+                        sync_send_kv_caches(hidden_states)
+                    now = time.time()
+                    logger.debug("KV send time: %f s", now - cur_time)
 
                 if self.lora_config:
                     LoraMask.setLoraMask(
