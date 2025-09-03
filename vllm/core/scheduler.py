@@ -627,7 +627,8 @@ class Scheduler:
                     logger.info("The fetching thread is shutting down.")
                     return
                 key_prefix = hash_list(seq_group.prompt_token_ids)
-                if is_key_ready(key_prefix):
+                # Temporarily disable responsive fetching
+                if True or is_key_ready(key_prefix):
                     fetch_kv(seq_group, key_prefix, True)
                     continue
 

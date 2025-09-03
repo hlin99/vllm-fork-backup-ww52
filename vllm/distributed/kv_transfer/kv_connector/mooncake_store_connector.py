@@ -457,7 +457,7 @@ class MooncakeStoreConnector(KVConnectorBase):
             # Put a separate signal key to avoid duplicated GC problem
             # caused by is_exist and get call on the same key
             # Not needed when we move to pure eviction solution
-            self.kv_store.put_bytes(str(store_key_prefix), b'OK')
+            # self.kv_store.put_bytes(str(store_key_prefix), b'OK')
         logger.debug("KV send DONE: %d, takes %f s",
                      len(input_tokens_list),
                      time.time() - start_time)
@@ -471,12 +471,16 @@ class MooncakeStoreConnector(KVConnectorBase):
         load_kvcache_key = f"{prefix}_kv"
         load_hidden_key = f"{prefix}_hs"
         shape = (self.num_layers, -1, self.num_kv_heads, self.head_size)
-        remote_kv = self.kv_store.get_unsafe(load_kvcache_key,
-                                             shape=shape,
-                                             dtype=self.dtype)
+        remote_kv = None
+        if self._wait_for_key(load_kvcache_key):
+            remote_kv = self.kv_store.get_unsafe(load_kvcache_key,
+                                                 shape=shape,
+                                                 dtype=self.dtype)
         # hidden_states always use bf16.
-        hidden = self.kv_store.get_unsafe(load_hidden_key,
-                                          shape=(1, self.hidden_size))
+        hidden = None
+        if self._wait_for_key(load_hidden_key):
+            hidden = self.kv_store.get_unsafe(load_hidden_key,
+                                              shape=(1, self.hidden_size))
 
         if remote_kv is None or hidden is None:
             logger.warning("KV cache miss. Key prefix: %s", prefix)
