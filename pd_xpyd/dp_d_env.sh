@@ -57,8 +57,8 @@ export VLLM_EP_SIZE=16
 
 #export PT_HPU_MOE_THRESHOLD=64
 export VLLM_SUPPORT_MOE_CHUNK="true"
-export PT_HPU_MOE_CHUNK="64"
-export PT_HPU_MOE_TOKEN_BOUNDARY="4096"
+export PT_HPU_MOE_CHUNK="64, 128"
+export PT_HPU_MOE_TOKEN_BOUNDARY="736, 1024"
 
 if [ "$INC_FP8" -eq 1 ]; then
   export QUANT_CONFIG="$BASH_DIR"/inc_fp8_tp1ep16.json

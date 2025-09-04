@@ -97,6 +97,8 @@ class VllmMixtureOfExpertsOpFP8(torch.nn.Module):
             ).split(",")
             if x.strip()
         ]
+        print("self.chunk_size_list=",self.chunk_size_list)
+        print("self.token_boundary_list=",self.token_boundary_list)
         assert len(self.chunk_size_list) == len(self.token_boundary_list), (
             f"chunk_size_list({len(self.chunk_size_list)}) and "
             f"token_boundary_list({len(self.token_boundary_list)}) must be the same length"
@@ -105,6 +107,7 @@ class VllmMixtureOfExpertsOpFP8(torch.nn.Module):
         self.global_num_experts = global_num_experts
         self.experts_min = experts_min
         self.experts_max = experts_max
+        print("#################################3 self.enable_moe_chunk=", self.enable_moe_chunk)
 
     def _get_extra_kwargs(self, tokens_num: int):
         if self.enable_moe_chunk:
