@@ -1076,7 +1076,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     "chunk_size": chunk_size,
                     "total_experts": 256,
                 }
-
+                print("chunk_size=", chunk_size)
+            else:
+                print("not enabled")
             if batched_tokens > self.moe_slice_length:
                 final_hidden_states_list = []
                 n_slice = (batched_tokens + self.moe_slice_length -
