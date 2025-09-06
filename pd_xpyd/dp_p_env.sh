@@ -10,12 +10,12 @@ export VLLM_GPU_MEMORY_UTILIZATION=0.7
 export VLLM_GRAPH_RESERVED_MEM=0.1
 export VLLM_GRAPH_PROMPT_RATIO=1
 # params
-model_len=8192
-max_num_batched_tokens=16384
-max_num_seqs=64
+model_len=10240
+max_num_batched_tokens=10240
+max_num_seqs=48
 input_min=128
 input_max=8192
-output_max=2048
+output_max=1024
 
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
 unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX
