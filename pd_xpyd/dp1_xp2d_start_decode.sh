@@ -8,5 +8,5 @@ else
     TP_SIZE=$1
 fi
 
-source "$BASH_DIR"/dp_start_decode.sh g9 16 $TP_SIZE 1 "10.239.128.244"
+source "$BASH_DIR"/dp_start_decode.sh g6 16 $TP_SIZE 1 "10.239.128.244"
 
