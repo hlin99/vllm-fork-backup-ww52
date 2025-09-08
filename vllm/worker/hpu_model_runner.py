@@ -3160,7 +3160,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             input_tokens_list, kv_caches_send_list,
                             hidden_states_list)
                         now = time.time()
-                        logger.info("KV send time: %s", now - cur_time)
+                        #logger.info("KV send time: %s", now - cur_time)
 
                     def async_send_kv_caches(hidden_states):
                         (input_tokens_list,
@@ -3184,7 +3184,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         sync_send_kv_caches(hidden_states)
 
                     now = time.time()
-                    logger.info("KV send time: %f", now - cur_time)
+                    #logger.info("KV send time: %f", now - cur_time)
 
                 if self.lora_config:
                     LoraMask.setLoraMask(
