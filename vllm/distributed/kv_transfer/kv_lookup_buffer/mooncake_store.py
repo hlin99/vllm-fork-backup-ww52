@@ -84,7 +84,7 @@ class MooncakeStore(KVLookupBufferBase):
     ):
 
         try:
-            from mooncake.store import MooncakeDistributedStore
+            from mooncake import MooncakeDistributedStore
         except ImportError as e:
             raise ImportError(
                 "Please install mooncake by following the instructions at "
@@ -199,42 +199,47 @@ class MooncakeStore(KVLookupBufferBase):
 
         return None
 
-    def put_tensor(
+    def put_unsafe(
         self,
         key: str,
         value: Optional[torch.Tensor],
     ) -> None:
-        """Put tensor to Mooncake Store"""
+        """Put KVCache to Mooncake Store"""
         value = value.cpu()
-        start_put = time.time()
+        start_serde = time.time()
+        data_ptr = value.data_ptr()
+        element_size = value.element_size()
+        numel = value.numel()
+        total_size = element_size * numel
+        end_serde = time.time()
         try:
-            self.store.put_tensor(key, value)
+            self.store.put_unsafe(key, data_ptr, total_size)
         except TypeError as err:
-            logger.error("Failed to put tensor into Mooncake Store: %s", err)
+            logger.error("Failed to put value into Mooncake Store: %s", err)
             raise TypeError("Mooncake Store Put Type Error.") from err
         end_put = time.time()
-        logger.debug("Put tensor to store. Time: %f", end_put - start_put)
+        logger.debug("contiguous time: %f, put time: %f",
+                     end_serde - start_serde, end_put - end_serde)
 
-    def get_tensor(self,
+    def get_unsafe(self,
                    key: str,
+                   shape,
                    dtype=torch.bfloat16) -> Optional[torch.Tensor]:
-        """Get tensor from Mooncake Store"""
+        """Get KVCache from Mooncake Store without type checking"""
         start_get = time.time()
-        try:
-            value = self.store.get_tensor(key)
-        except TypeError as err:
-            logger.error("Failed to get tensor from Mooncake Store: %s", err)
-            raise TypeError("Mooncake Store Get Type Error.") from err
+        data = self.store.get(key)
         end_get = time.time()
-        if value is None:
-            logger.error("Failed to get tensor from Mooncake Store: %s", key)
-            return None
-        # This is a workaround for get_tensor which returns wrong tensor type
-        # Remove when Mooncake get_tensor fixed the issue
-        value = value.view(dtype)
-        logger.debug("Get tensor from store. Time: %f", end_get - start_get)
-        return value
+        if data:
+            tensor = torch.frombuffer(data, dtype=dtype)
+            shape = (61, -1, 1, 576) if shape is None else shape
+            tensor = tensor.view(shape)
+            end_from_buffer = time.time()
+            logger.debug("from buffer time: %f , get time: %f",
+                         end_from_buffer - end_get, end_get - start_get)
+
+            return tensor
+        return None
 
     def is_exist(self, key: str) -> bool:
         """Check if the key exists in the Mooncake Store"""
-        return self.store.is_exist(key) == 1
+        return self.store.isExist(key) == 1
