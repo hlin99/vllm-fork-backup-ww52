@@ -1,4 +1,5 @@
 #!/bin/bash
+BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 
 export PATH=$PATH:/usr/local/lib/python3.10/dist-packages/mooncake/
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib/python3.10/dist-packages/mooncake
@@ -25,8 +26,9 @@ if has_arg benchmark "$@"; then
   BENCHMARK_MODE=1
 fi
 
-etcd --listen-client-urls http://0.0.0.0:2379 \
-     --advertise-client-urls http://localhost:2379 \
-     >etcd.log 2>&1 &
+source "$BASH_DIR"/etcd.sh
+#etcd --listen-client-urls http://0.0.0.0:2379 \
+#     --advertise-client-urls http://localhost:2379 \
+#     >etcd.log 2>&1 &
 
-mooncake_master -max_threads 64 -port 50001 -eviction_high_watermark_ratio 0.8 -eviction_ratio 0.2 --v=1 >mooncake_master.log 2>&1 &
+mooncake_master -max_threads 256 -port 50001 -eviction_high_watermark_ratio 0.6 -eviction_ratio 0.4 --v=1 >mooncake_master.log 2>&1 &
