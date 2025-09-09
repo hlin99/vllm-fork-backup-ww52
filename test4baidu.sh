@@ -5,7 +5,7 @@
 #model_path=/mnt/disk002/HF_Models/DeepSeek-R1-Gaudi3/
 model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2-static/
 #model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2/
-ip_addr=10.239.129.24
+ip_addr=10.239.129.9
 port=8868
 #len_ratio=0.8
 max_batch_size=16
@@ -14,7 +14,7 @@ export PT_HPU_LAZY_MODE=1
 
 export https_proxy=http://proxy-dmz.intel.com:912
 export no_proxy=127.0.0.1
-pip install datasets
+#pip install datasets
 
 wait_vllm() {
     #bash start_vllm.sh $model_path $port &>server.log &
@@ -52,9 +52,9 @@ test_lm_eval() {
         fi
 }
 
-num_of_p_node = 1
 
 test_benchmark_serving_range() {
+    num_of_p_node=4
     local_input=$1
     local_output=$2
     local_max_concurrency=$3
@@ -74,22 +74,24 @@ test_benchmark_serving_range() {
     echo "Fixed-length dataset, input len: $local_input, output len: $local_output, output throughput (tok/s): $output_throughput, mean TPOT (ms): $mean_tpot, time taken: $(( end - start )) seconds"
 }
 
-
-test_benchmark_serving_range 256 256 672
-test_benchmark_serving_range 256 1024 640
-test_benchmark_serving_range 1024 256 640
-test_benchmark_serving_range 512 512 640
-test_benchmark_serving_range 1024 1024 576
+test_benchmark_serving_range 128 128 512
+test_benchmark_serving_range 128 256 512
+test_benchmark_serving_range 256 256 512
+test_benchmark_serving_range 256 1024 512
+test_benchmark_serving_range 1024 256 512
+test_benchmark_serving_range 512 512 512
+test_benchmark_serving_range 1024 1024 512
 test_benchmark_serving_range 2048 1024 512
-test_benchmark_serving_range 3584 1536 480
-test_benchmark_serving_range 8192 1024 384
+test_benchmark_serving_range 3584 1536 512
+test_benchmark_serving_range 8192 1024 512
 
-
+test_benchmark_serving_range 128 128 96
+test_benchmark_serving_range 128 256 96
 test_benchmark_serving_range 256 256 96
-test_benchmark_serving_range 256 1024 80
-test_benchmark_serving_range 1024 256 80
-test_benchmark_serving_range 512 512 80
-test_benchmark_serving_range 1024 1024 80
-test_benchmark_serving_range 2048 1024 64
-test_benchmark_serving_range 3584 1536 48
-test_benchmark_serving_range 8192 1024 32
+test_benchmark_serving_range 256 1024 96
+test_benchmark_serving_range 1024 256 96
+test_benchmark_serving_range 512 512 96
+test_benchmark_serving_range 1024 1024 96
+test_benchmark_serving_range 2048 1024 96
+test_benchmark_serving_range 3584 1536 96
+test_benchmark_serving_range 8192 1024 96

@@ -32,9 +32,7 @@ echo "Using Mooncake config: $MOONCAKE_CONFIG_PATH"
 source "$BASH_DIR"/dp_p_env.sh
 
 timestamp=$(date +"%Y%m%d_%H%M%S")
-log_dir="xpyd_logs"
-mkdir -p "$log_dir"
-log_file="$log_dir/prefill_${timestamp}.log"
+log_file="$XPYD_LOGS/prefill_${timestamp}.log"
 
 if [ "$INC_FP8" -eq 1 ]; then
   kv_cache_dtype_arg="--kv-cache-dtype fp8_inc"

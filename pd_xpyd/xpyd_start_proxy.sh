@@ -73,7 +73,7 @@ for ((i=0; i<$NUM_DECODE; i++)); do
 done
 
 #For OAM
-PREFILL_IPS=("10.239.129.9" "10.239.129.67" "10.239.129.21" "10.239.128.165" "10.239.128.244" "10.239.128.153")
+PREFILL_IPS=("10.239.129.9" "10.239.128.165" "10.239.129.67" "10.239.129.21" "10.239.128.244" "10.239.128.153")
 #For PCIE
 # PREFILL_IPS=("10.112.110.157")
 
@@ -111,9 +111,7 @@ else
 fi
 
 timestamp=$(date +"%Y%m%d_%H%M%S")
-log_dir="xpyd_logs"
-mkdir -p "$log_dir"
-log_file="$log_dir/ProxyServer_${timestamp}.log"
+log_file="$XPYD_LOGS/ProxyServer_${timestamp}.log"
 
 CMD="$CMD 2>&1 | tee $log_file"
 

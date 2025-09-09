@@ -6,8 +6,6 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/dp_d_env.sh
 
 timestamp=$(date +"%Y%m%d_%H%M%S")
-log_dir="xpyd_logs"
-mkdir -p "$log_dir"
 
 export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_$1.json
 echo "MOONCAKE_CONFIG_PATH=$MOONCAKE_CONFIG_PATH"
@@ -72,7 +70,7 @@ do
     $kv_cache_dtype_arg
     --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}'
   )
-  log_file="$log_dir/log_rank${RANK}_${timestamp}.log"
+  log_file="$XPYD_LOGS/log_rank${RANK}_${timestamp}.log"
 
   extra_env=()
 #  if [ "$i" -eq 0 ] && [ "$RANK" -eq 0 ]; then
