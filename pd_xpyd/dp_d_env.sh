@@ -15,7 +15,7 @@ export VLLM_DELAYED_SAMPLING="true"
 # params
 model_len=32768
 max_num_batched_tokens=32768
-max_num_seqs=64
+max_num_seqs=32
 input_min=128
 input_max=32768
 output_max=32768
@@ -35,7 +35,7 @@ export VLLM_PROMPT_SEQ_BUCKET_STEP=128
 export VLLM_PROMPT_SEQ_BUCKET_MAX=1
 
 #export VLLM_DECODE_BLOCK_BUCKET_MIN=2048
-export VLLM_DECODE_BS_BUCKET_STEP=64
+export VLLM_DECODE_BS_BUCKET_STEP=32
 export VLLM_DECODE_BLOCK_BUCKET_STEP=1024
 
 echo " environments are reseted "
@@ -46,7 +46,7 @@ env | grep VLLM_DECODE_BS
 env | grep VLLM_DECODE_BLOCK
 
 export VLLM_SKIP_WARMUP=True
-#unset VLLM_SKIP_WARMUP
+unset VLLM_SKIP_WARMUP
 export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/1p1d,false,131072
 
 export VLLM_DP_SIZE=2

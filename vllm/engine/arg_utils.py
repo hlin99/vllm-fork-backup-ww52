@@ -1275,7 +1275,7 @@ class EngineArgs:
                 "If your use case is not supported by "
                 "SelfAttnBlockSpaceManager (i.e. block manager v2),"
                 " please file an issue with detailed information.")
-
+        print("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& self.preemption_mode=",self.preemption_mode)
         scheduler_config = SchedulerConfig(
             runner_type=model_config.runner_type,
             max_num_batched_tokens=self.max_num_batched_tokens,

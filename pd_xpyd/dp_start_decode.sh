@@ -68,6 +68,8 @@ do
     --enable-reasoning
     --reasoning-parser deepseek_r1
     $kv_cache_dtype_arg
+    --preemption-mode swap
+    --swap-space 4
     --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}'
   )
   log_file="$XPYD_LOGS/log_rank${RANK}_${timestamp}.log"

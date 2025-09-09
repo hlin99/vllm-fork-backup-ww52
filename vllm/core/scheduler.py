@@ -1791,9 +1791,10 @@ class Scheduler:
 
         elif self.user_specified_preemption_mode == "swap":
             preemption_mode = PreemptionMode.SWAP
+            print("#####################################################  preemption_mode = PreemptionMode.SWAP")
         else:
             preemption_mode = PreemptionMode.RECOMPUTE
-
+        print("#####################################################  preemption_mode =", preemption_mode)
         if self.num_cumulative_preemption % 50 == 0:
             logger.warning(
                 "Sequence group %s is preempted by %s mode because there is "
