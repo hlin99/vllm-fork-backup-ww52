@@ -44,6 +44,10 @@ export VLLM_SKIP_WARMUP=True
 export VLLM_DP_SIZE=1
 export VLLM_USE_V1=0
 
+export VLLM_SUPPORT_MOE_CHUNK="true"
+export PT_HPU_MOE_CHUNK="64, 128"
+export PT_HPU_MOE_TOKEN_BOUNDARY="736, 1024"
+
 #unset VLLM_SKIP_WARMUP
 #export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww33_inc_fp8_p,false,131072
 
