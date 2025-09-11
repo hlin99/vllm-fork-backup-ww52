@@ -60,5 +60,5 @@ python3 -m vllm.entrypoints.openai.api_server \
   --distributed_executor_backend mp \
   $kv_cache_dtype_arg \
   --preemption-mode swap \
-  --swap-space 16 \
+  --swap-space 16 2>&1 | tee "$log_file"
 #  --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}' 2>&1 | tee "$log_file"
