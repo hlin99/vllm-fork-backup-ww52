@@ -56,7 +56,7 @@ export VLLM_EP_SIZE=16
 
 # warmup settings
 export VLLM_SKIP_WARMUP=True
-#unset VLLM_SKIP_WARMUP
+unset VLLM_SKIP_WARMUP
 export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_d_cache,false,131072
 
 # MoE settings
