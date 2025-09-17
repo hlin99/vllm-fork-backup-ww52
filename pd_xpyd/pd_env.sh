@@ -9,7 +9,7 @@ export REQUIRED_VERSION=1.22.0
 export LIBFABRIC_ROOT=/opt/libfabric-1.22.0
 export LD_LIBRARY_PATH=$LIBFABRIC_ROOT/lib:$LD_LIBRARY_PATH
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
-export no_proxy=localhost,127.0.0.1,10.239.0.0/16,192.168.0.0/16,192.168.100.191
+export no_proxy=localhost,127.0.0.1,10.239.0.0/16,192.168.0.0/16,192.168.100.191,192.168.1.3,192.168.1.4,192.168.1.5
 
 # HPU settings
 export PT_HPU_LAZY_MODE=1
