@@ -493,8 +493,8 @@ class MooncakeStoreConnector(KVConnectorBase):
 
     def _wait_for_key(self, key, timeout_in_seconds=None):
         if timeout_in_seconds is None:
-            # default to 10 seconds
-            timeout_in_seconds = 10
+            # default to 100 seconds
+            timeout_in_seconds = 100
         timeout = time.time() + timeout_in_seconds
         while not self.kv_store.is_exist(key):
             if time.time() > timeout:
