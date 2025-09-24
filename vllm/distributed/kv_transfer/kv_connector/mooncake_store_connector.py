@@ -247,6 +247,7 @@ class MooncakeStoreConnector(KVConnectorBase):
         assert len(input_tokens_list) == len(kv_caches_send_list)
         assert len(input_tokens_list) == len(hidden_states_list)
         for idx, input_tokens in enumerate(input_tokens_list):
+            print(" input_tokens=", input_tokens)
             store_key_prefix = self.tensor_hash(input_tokens)
             store_kvcache_key = f"{store_key_prefix}_{self.rank}"
             store_hidden_key = f"{store_key_prefix}_hidden_{self.rank}"
@@ -254,9 +255,10 @@ class MooncakeStoreConnector(KVConnectorBase):
             self.kv_store.put_tensor(store_kvcache_key,
                                      kv_caches_send_list[idx])
             self.kv_store.put_tensor(store_hidden_key, hidden_states_list[idx])
-        logger.info("[rank %d]: KV send DONE. send %d, takes %f s", self.rank,
+        logger.info("[rank %d]: KV send DONE. send %d, takes %f s, key=%s", self.rank,
                     len(input_tokens_list),
-                    time.time() - start_time)
+                    time.time() - start_time,
+                    store_kvcache_key)
 
     def send_kv_caches_and_hidden_states_hpu(
         self,
@@ -494,7 +496,7 @@ class MooncakeStoreConnector(KVConnectorBase):
     def _wait_for_key(self, key, timeout_in_seconds=None):
         if timeout_in_seconds is None:
             # default to 10 seconds
-            timeout_in_seconds = 20
+            timeout_in_seconds = 120
         timeout = time.time() + timeout_in_seconds
         while not self.kv_store.is_exist(key):
             if time.time() > timeout:
