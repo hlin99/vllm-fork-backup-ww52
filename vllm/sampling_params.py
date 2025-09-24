@@ -247,7 +247,7 @@ class SamplingParams(
                 int(token): bias
                 for token, bias in logit_bias.items()
             }
-
+        print(" yyy max_tokens=", max_tokens)
         return SamplingParams(
             n=1 if n is None else n,
             best_of=best_of,

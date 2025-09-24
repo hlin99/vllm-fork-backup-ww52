@@ -379,10 +379,21 @@ def sample_random_requests(
         size=num_prompts,
     )
     output_lens = np.random.randint(
-        int(output_len * range_ratio),
+        max(1, int(output_len * range_ratio)),
         output_len + 1,
         size=num_prompts,
     )
+    if (output_lens == 0).any():    
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        import torch
+
+        output_lens = torch.tensor(output_lens)  # 确保是 tensor
+
+        zero_indices = torch.nonzero(output_lens == 0).squeeze(-1)
+        if zero_indices.numel() > 0:
+            print("Found zeros at indices:", zero_indices.tolist())
+            print("Values:", output_lens[zero_indices].tolist())
+
     offsets = np.random.randint(0, tokenizer.vocab_size, size=num_prompts)
     input_requests = []
     for i in range(num_prompts):
@@ -461,7 +472,7 @@ def calculate_metrics(
     for i in range(len(outputs)):
         if outputs[i].success:
             output_len = outputs[i].output_tokens
-
+            #print(" outputs[i].success, i=", i)
             if output_len is None:
                 # We use the tokenizer to count the number of output tokens
                 # for some serving backends instead of looking at
@@ -485,6 +496,14 @@ def calculate_metrics(
             e2els.append(outputs[i].latency)
             completed += 1
         else:
+            if hasattr(outputs[i], "generated_text"):
+                print(f"Request {i} failed, generated_text={outputs[i].generated_text}")
+            if hasattr(outputs[i], "error"):
+                print("Error:", outputs[i].error)
+            if hasattr(outputs[i], "exception"):
+                print("Exception:", outputs[i].exception)
+            if hasattr(outputs[i], "traceback"):
+                print("Traceback:\n", outputs[i].traceback)
             actual_output_lens.append(0)
 
     if goodput_config_dict:

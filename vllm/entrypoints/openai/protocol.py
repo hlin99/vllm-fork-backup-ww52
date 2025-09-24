@@ -785,12 +785,22 @@ class CompletionRequest(OpenAIBaseModel):
         if default_sampling_params is None:
             default_sampling_params = {}
 
+        print(" xxx to_sampling_params 0")
         # Use minimum of context window, user request & server limit.
-        max_tokens = min(
-            val for val in (default_max_tokens, max_tokens,
-                            default_sampling_params.get("max_tokens", None))
-            if val is not None)
+        #max_tokens = min(
+        #    val for val in (default_max_tokens, max_tokens,
+        #                    default_sampling_params.get("max_tokens", None))
+        #    if val is not None)
+        candidates = (default_max_tokens, max_tokens, default_sampling_params.get("max_tokens", None))
+        valid_values = []
+        print("Candidates in order:", candidates)
 
+        for val in candidates:
+            if val is not None:
+                valid_values.append(val)
+
+        max_tokens = min(valid_values)
+        print("Final max_tokens:", max_tokens)
         # Default parameters
         if (repetition_penalty := self.repetition_penalty) is None:
             repetition_penalty = default_sampling_params.get(
@@ -820,7 +830,7 @@ class CompletionRequest(OpenAIBaseModel):
         if (self.response_format is not None
                 and self.response_format.type == "json_object"):
             guided_json_object = True
-
+        print(" xxx to_sampling_params 2")
         guided_decoding = GuidedDecodingParams.from_optional(
             json=self.guided_json,
             regex=self.guided_regex,
@@ -829,7 +839,7 @@ class CompletionRequest(OpenAIBaseModel):
             json_object=guided_json_object,
             backend=self.guided_decoding_backend,
             whitespace_pattern=self.guided_whitespace_pattern)
-
+        print(" xxx to_sampling_params 3, max_tokens=", max_tokens)
         return SamplingParams.from_optional(
             n=self.n,
             best_of=self.best_of,
