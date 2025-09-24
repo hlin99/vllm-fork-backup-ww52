@@ -71,6 +71,7 @@ class OpenAIServingCompletion(OpenAIServing):
             - suffix (the language models we currently support do not support
             suffix)
         """
+        print(" create_completion [1]!!!")
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
             return error_check_ret
@@ -111,7 +112,7 @@ class OpenAIServingCompletion(OpenAIServing):
         except ValueError as e:
             logger.exception("Error in preprocessing prompt inputs")
             return self.create_error_response(str(e))
-
+        print(" create_completion [2]!!!")
         # Schedule the request and get the result generator.
         generators: List[AsyncGenerator[RequestOutput, None]] = []
         try:
@@ -119,17 +120,32 @@ class OpenAIServingCompletion(OpenAIServing):
                 sampling_params: Union[SamplingParams, BeamSearchParams]
                 default_max_tokens = self.max_model_len - len(
                     engine_prompt["prompt_token_ids"])
+                print(f"[WARNING] Prompt too long! default_max_tokens={default_max_tokens}, "
+                      f"max_model_len={self.max_model_len}, prompt_len={len(engine_prompt['prompt_token_ids'])}")
                 # Build default sampling params
                 default_sampling_params = (
                     self.model_config.get_diff_sampling_param())
+                
+                print("default_sampling_params:")
+                for attr in dir(default_sampling_params):
+                    if not attr.startswith("_"):
+                        print(f"  {attr} = {getattr(default_sampling_params, attr)}")
+
+
                 if request.use_beam_search:
+                    print(" request.use_beam_search ")
                     sampling_params = request.to_beam_search_params(
                         default_max_tokens, default_sampling_params)
                 else:
+                    print("not request.use_beam_search ")
                     sampling_params = request.to_sampling_params(
                         default_max_tokens,
                         self.model_config.logits_processor_pattern,
                         default_sampling_params)
+                print("sampling_params:")
+                for attr in dir(sampling_params):
+                    if not attr.startswith("_"):
+                        print(f"  {attr} = {getattr(sampling_params, attr)}")
 
                 request_id_item = f"{request_id}-{i}"
 
@@ -160,7 +176,9 @@ class OpenAIServingCompletion(OpenAIServing):
                     )
 
                 generators.append(generator)
+            print(" create_completion [3]!!!")
         except ValueError as e:
+            print(f"hlin99: ValueError: {e}")
             # TODO: Use a vllm-specific Validation Error
             return self.create_error_response(str(e))
 
@@ -178,6 +196,7 @@ class OpenAIServingCompletion(OpenAIServing):
 
         # Streaming response
         if stream:
+            print(" create_completion [4]!!!")
             return self.completion_stream_generator(
                 request,
                 result_generator,
@@ -187,7 +206,7 @@ class OpenAIServingCompletion(OpenAIServing):
                 num_prompts=num_prompts,
                 tokenizer=tokenizer,
                 request_metadata=request_metadata)
-
+        print(" create_completion [5]!!!")
         # Non-streaming response
         final_res_batch: List[Optional[RequestOutput]] = [None] * num_prompts
         try:
@@ -374,6 +393,7 @@ class OpenAIServingCompletion(OpenAIServing):
             request_metadata.final_usage_info = final_usage_info
 
         except Exception as e:
+            print(f"hlin99, ValueError2: {e}")
             # TODO: Use a vllm-specific Validation Error
             data = self.create_streaming_error_response(str(e))
             yield f"data: {data}\n\n"

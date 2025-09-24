@@ -60,6 +60,7 @@ do
     --trust-remote-code
     --disable-log-requests
     --max-num-batched-tokens "$max_num_batched_tokens"
+    --max-num-prefill-seqs 1
     --use-padding-aware-scheduling
     --use-v2-block-manager
     --distributed_executor_backend mp

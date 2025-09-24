@@ -580,12 +580,26 @@ class Scheduler:
                 return
 
             self.scheduler_profiler.start('internal', 'fetching_kv')
-            print("prompt_token_ids:", seq_group.prompt_token_ids)
+            if len(seq_group.prompt_token_ids) == 1:
+                print("< tony tony tony > len(seq_group.prompt_token_ids) == 1")
+                hash_prefix = hash_list(seq_group.prompt_token_ids)
+                #kv_cache = [torch.empty(0, device="cpu")]
+                #hidden_states = [torch.empty(0, device="cpu")]
+                kv_cache = torch.zeros((61, 128, 1, 576), device="cpu")
+                hidden_states = torch.zeros((1, 7168), device="cpu")
+
+                put_to_shared_dict(hash_prefix, kv_cache, hidden_states)
+                self.fetching_done.put((seq_group, True))
+                self.fetching_queue.task_done()
+                self.scheduler_profiler.end()
+                continue
+            #print("prompt_token_ids:", seq_group.prompt_token_ids)
 
             hash_prefix = hash_list(seq_group.prompt_token_ids)
-            print("hash_prefix:", hash_prefix)
+            #print("hash_prefix:", hash_prefix)
             prefix, kv_cache, hidden_states = get_kv_and_hidden_states(
                 hash_prefix)
+            print("kv_cache.shape, hidden_states.shape:", kv_cache.shape, hidden_states.shape)
             if kv_cache is not None:
                 fetching_success = True
                 put_to_shared_dict(prefix, kv_cache, hidden_states)
@@ -644,6 +658,8 @@ class Scheduler:
         if self.need_fetch_kv:
             self.fetching_queue.put(seq_group)
             self.fetching.append(seq_group)
+            #import traceback
+            #traceback.print_stack()
         else:
             # Add sequence groups to the waiting queue.
             self.waiting.append(seq_group)
