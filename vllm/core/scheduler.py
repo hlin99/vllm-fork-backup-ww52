@@ -1794,8 +1794,7 @@ class Scheduler:
         else:
             preemption_mode = PreemptionMode.RECOMPUTE
 
-        if self.num_cumulative_preemption % 50 == 0:
-            logger.warning(
+        logger.warning(
                 "Sequence group %s is preempted by %s mode because there is "
                 "not enough KV cache space. This can affect the end-to-end "
                 "performance. Increase gpu_memory_utilization or "
@@ -1829,6 +1828,7 @@ class Scheduler:
         seq_group: SequenceGroup,
         blocks_to_swap_out: List[Tuple[int, int]],
     ) -> None:
+        print("_preempt_by_swap: blocks_to_swap_out=",blocks_to_swap_out)
         self._swap_out(seq_group, blocks_to_swap_out)
 
     def _swap_in(
@@ -1837,9 +1837,11 @@ class Scheduler:
         blocks_to_swap_in: List[Tuple[int, int]],
     ) -> None:
         mapping = self.block_manager.swap_in(seq_group)
+        print(" _swap_in, mapping=", mapping)
         blocks_to_swap_in.extend(mapping)
         for seq in seq_group.get_seqs(status=SequenceStatus.SWAPPED):
             seq.status = SequenceStatus.RUNNING
+            print(" SequenceStatus.RUNNING, seq=",seq)
 
     def _swap_out(
         self,
@@ -1853,9 +1855,11 @@ class Scheduler:
                 "Aborted due to the lack of CPU swap space. Please increase "
                 "the swap space to avoid this error.")
         mapping = self.block_manager.swap_out(seq_group)
+        print(" _swap_out, mapping=", mapping)
         blocks_to_swap_out.extend(mapping)
         for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
             seq.status = SequenceStatus.SWAPPED
+            print(" SequenceStatus.SWAPPED, seq=",seq)
 
     def _passed_delay(self, now: float) -> bool:
         if self.prev_prompt:
