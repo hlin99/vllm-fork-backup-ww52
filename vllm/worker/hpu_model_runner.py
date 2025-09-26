@@ -1027,10 +1027,39 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _is_valid_bucket(self, bucket):
         return bucket[0] * bucket[1] <= self.max_num_batched_tokens
 
+    #def _num_blocks(self, attn_metadata):
+    #    if attn_metadata.block_list is None:
+    #        return 0
+    #    
+    #    return attn_metadata.block_list.numel()
     def _num_blocks(self, attn_metadata):
-        if attn_metadata.block_list is None:
+        block_list = attn_metadata.block_list
+
+        if block_list is None:
+            print("block_list is None")
             return 0
-        return attn_metadata.block_list.numel()
+
+        # 如果是 torch.Tensor
+        try:
+            import torch
+            if isinstance(block_list, torch.Tensor):
+                print("block_list (Tensor):", block_list)
+                print("block_list shape:", block_list.shape)
+                return block_list.numel()
+        except ImportError:
+            pass
+
+        # 如果是 Python list
+        if isinstance(block_list, list):
+            print("block_list (list):", block_list)
+            return len(block_list)
+
+        # 其他类型
+        print("block_list (unknown type):", block_list, type(block_list))
+        try:
+            return len(block_list)
+        except Exception:
+            return 0
 
     def _phase(self, attn_metadata):
         phase_type: PhaseType
@@ -1376,6 +1405,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
             if lora_id > 0:
                 lora_requests.add(seq_group_metadata.lora_request)
+            print("block_tables =", seq_group_metadata.block_tables)
 
             for seq_id in seq_ids:
                 seq_data = seq_group_metadata.seq_data[seq_id]
@@ -1392,6 +1422,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 seq_lens.append(seq_len)
 
                 block_table = seq_group_metadata.block_tables[seq_id]
+                #print(f"seq_id = {seq_id}")
+                #print(f"block_table shape = {block_table.shape if hasattr(block_table, 'shape') else 'N/A'}")
+                #print(block_table)
                 num_fully_occupied_blocks = position // self.block_size
                 block_table = block_table[:num_fully_occupied_blocks + 1]
 

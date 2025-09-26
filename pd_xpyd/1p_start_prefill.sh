@@ -39,7 +39,9 @@ CMD=(
     --use-v2-block-manager
     --distributed_executor_backend mp
     $kv_cache_dtype_arg
-    --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}'
+    --preemption-mode swap
+    --swap-space 16
+#    --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}'
 )
 
 # Check if XPYD_LOG is set
