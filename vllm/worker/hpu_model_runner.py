@@ -1376,7 +1376,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
             if lora_id > 0:
                 lora_requests.add(seq_group_metadata.lora_request)
-            print("block_tables =", seq_group_metadata.block_tables)
+            #print("block_tables =", seq_group_metadata.block_tables)
             for seq_id in seq_ids:
                 seq_data = seq_group_metadata.seq_data[seq_id]
                 if output is None:

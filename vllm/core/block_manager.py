@@ -174,9 +174,6 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
         seq = waiting_seqs[0]
         block_table: BlockTable = self._allocate_sequence(seq)
         self.block_tables[seq.seq_id] = block_table
-        print(f"block manager: seq_id={seq.seq_id}")
-        print("physical_block_ids:", block_table.physical_block_ids)
-        print("blocks:", block_table.blocks)
         # Track seq
         self._last_access_blocks_tracker.add_seq(seq.seq_id)
 
