@@ -162,6 +162,30 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
 
         return block_table
 
+    def debug_block_tables(seq_group_metadata):
+        for seq_id, block_table in seq_group_metadata.block_tables.items():
+            print(f"=== seq_id: {seq_id} ===")
+        
+            # blocks
+            if hasattr(block_table, "blocks"):
+                print("blocks:", block_table.blocks)
+            else:
+                print("blocks: N/A")
+        
+            # internal _blocks
+            if hasattr(block_table, "_blocks"):
+                print("_blocks:", block_table._blocks)
+            else:
+                print("_blocks: N/A")
+        
+            # physical block ids
+            if hasattr(block_table, "physical_block_ids"):
+                print("physical_block_ids:", block_table.physical_block_ids)
+            else:
+                print("physical_block_ids: N/A")
+        
+            print("-------------------------------")
+
     def allocate(self, seq_group: SequenceGroup) -> None:
 
         # Allocate self-attention block tables for decoder sequences
@@ -174,7 +198,9 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
         seq = waiting_seqs[0]
         block_table: BlockTable = self._allocate_sequence(seq)
         self.block_tables[seq.seq_id] = block_table
-
+        print(f"block manager: seq_id={seq.seq_id}")
+        print("physical_block_ids:", block_table.physical_block_ids)
+        print("blocks:", block_table.blocks)
         # Track seq
         self._last_access_blocks_tracker.add_seq(seq.seq_id)
 
@@ -384,14 +410,14 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
             seq_physical_block_id_mapping = {
                 self.block_allocator.get_physical_block_id(
                     Device.CPU, cpu_block_id):
-                self.block_allocator.get_physical_block_id(
-                    Device.GPU, gpu_block_id)
+                (self.block_allocator.get_physical_block_id(
+                    Device.GPU, gpu_block_id) + 1)
                 for cpu_block_id, gpu_block_id in seq_swap_mapping.items()
             }
 
             physical_block_id_mapping.extend(
                 list(seq_physical_block_id_mapping.items()))
-
+        print("< swap_in > physical_block_id_mapping=", physical_block_id_mapping)
         return physical_block_id_mapping
 
     def can_swap_out(self, seq_group: SequenceGroup) -> bool:
@@ -426,25 +452,41 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
             blocks = self.block_tables[seq.seq_id].blocks
             if len(blocks) == 0:
                 continue
-
+            print(" swap_out1 --- seq.seq_id, self.block_tables[seq.seq_id].physical_block_ids=", seq.seq_id, self.block_tables[seq.seq_id].physical_block_ids)
+            for i, block in enumerate(blocks):
+                print(f"block {i}: id={block.block_id}")
             seq_swap_mapping = self.block_allocator.swap(blocks=blocks,
                                                          src_device=Device.GPU,
                                                          dst_device=Device.CPU)
 
             # Refresh the block ids of the table (post-swap)
             self.block_tables[seq.seq_id].update(blocks)
+            print(" swap_out2 --- seq.seq_id, self.block_tables[seq.seq_id].physical_block_ids=", seq.seq_id, self.block_tables[seq.seq_id].physical_block_ids)
+            
+            seq_physical_block_id_mapping = {}
 
-            seq_physical_block_id_mapping = {
-                self.block_allocator.get_physical_block_id(
-                    Device.GPU, gpu_block_id):
-                self.block_allocator.get_physical_block_id(
-                    Device.CPU, cpu_block_id)
-                for gpu_block_id, cpu_block_id in seq_swap_mapping.items()
-            }
+            for gpu_block_id, cpu_block_id in seq_swap_mapping.items():
+                gpu_physical_id = self.block_allocator.get_physical_block_id(Device.GPU, gpu_block_id) + 1
+                cpu_physical_id = self.block_allocator.get_physical_block_id(Device.CPU, cpu_block_id)
+    
+                # 打印每个映射
+                print(f"GPU block {gpu_block_id} -> physical_id {gpu_physical_id}, "
+                  f"CPU block {cpu_block_id} -> physical_id {cpu_physical_id}")
+    
+                seq_physical_block_id_mapping[gpu_physical_id] = cpu_physical_id
+
+            #seq_physical_block_id_mapping = {
+            #   self.block_allocator.get_physical_block_id(
+            #        Device.GPU, gpu_block_id):
+            #    self.block_allocator.get_physical_block_id(
+            #        Device.CPU, cpu_block_id)
+            #    for gpu_block_id, cpu_block_id in seq_swap_mapping.items()
+            #}
+            print(" swap_out3 --- seq.seq_id, seq_physical_block_id_mapping=", seq.seq_id, seq_physical_block_id_mapping)
 
             physical_block_id_mapping.extend(
                 list(seq_physical_block_id_mapping.items()))
-
+        print(" < swap_out > physical_block_id_mapping =", physical_block_id_mapping)
         return physical_block_id_mapping
 
     def get_num_free_gpu_blocks(self) -> int:
