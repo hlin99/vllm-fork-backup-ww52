@@ -1036,26 +1036,26 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_list = attn_metadata.block_list
 
         if block_list is None:
-            print("block_list is None")
+            #print("block_list is None")
             return 0
 
         # 如果是 torch.Tensor
         try:
             import torch
             if isinstance(block_list, torch.Tensor):
-                print("block_list (Tensor):", block_list)
-                print("block_list shape:", block_list.shape)
+                #print("block_list (Tensor):", block_list)
+                #print("block_list shape:", block_list.shape)
                 return block_list.numel()
         except ImportError:
             pass
 
         # 如果是 Python list
         if isinstance(block_list, list):
-            print("block_list (list):", block_list)
+            #print("block_list (list):", block_list)
             return len(block_list)
 
         # 其他类型
-        print("block_list (unknown type):", block_list, type(block_list))
+        #print("block_list (unknown type):", block_list, type(block_list))
         try:
             return len(block_list)
         except Exception:
