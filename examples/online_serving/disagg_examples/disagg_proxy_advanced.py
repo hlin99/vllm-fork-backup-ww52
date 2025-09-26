@@ -565,6 +565,9 @@ class Proxy:
                     f"create_completion -- prompt length: {total_length}, "
                     f"tokenizer took "
                     f"{(end_time - start_time) * 1000:.2f} ms")
+                if total_length == 1:
+                    print("tony tony tony, only 1 token")
+                    print(self.tokenizer(prompt)["input_ids"])
                 prefill_instance = self.schedule(self.prefill_cycler,
                                                  is_prompt=True,
                                                  request_len=total_length)
@@ -648,6 +651,10 @@ class Proxy:
                 self.get_total_token_length(msg['content'])
                 for msg in kv_prepare_request['messages'])
             end_time = time.time()
+            if total_length == 1:
+                    print("<chat> tony tony tony, only 1 token")
+                    print(self.tokenizer(prompt)["input_ids"])
+
             log_info_green(
                 f"create_chat_completion -- prompt length: {total_length}, "
                 f"tokenizer took "

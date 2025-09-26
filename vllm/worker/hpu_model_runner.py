@@ -1105,6 +1105,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # it contains output tokens.
             seq_len = min(seq_data.get_len(), context_len + token_chunk_size)
             prompt_tokens = seq_data.get_token_ids()[context_len:seq_len]
+            print(" hlin hlin hlin, seq_len=", seq_len)
             seq_lens.append(seq_len)
 
             # NOTE: This only works for oooooooxxx style attention.
