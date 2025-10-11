@@ -9,6 +9,8 @@ from vllm.core.block.prefix_caching_block import PrefixCachingBlockAllocator
 from vllm.platforms import current_platform
 from vllm.utils import Device
 
+# Global reserved block count depending on platform
+RESERVED_BLOCKS: int = 1 if current_platform.is_hpu() else 0
 
 class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
     """A block allocator that can allocate blocks on both CPU and GPU memory.
@@ -56,10 +58,9 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
                 before CPU block IDs.
         """
         # For HPU, block id 0 is used only for padding
-        reserved_blocks = 1 if current_platform.is_hpu() else 0
         block_ids = list(
-            range(reserved_blocks, num_gpu_blocks + num_cpu_blocks))
-        num_gpu_blocks -= reserved_blocks
+            range(RESERVED_BLOCKS, num_gpu_blocks + num_cpu_blocks))
+        num_gpu_blocks -= RESERVED_BLOCKS
         gpu_block_ids = block_ids[:num_gpu_blocks]
         cpu_block_ids = block_ids[num_gpu_blocks:]
 
@@ -253,12 +254,12 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
         Returns:
             int: The zero-offset block id on certain device.
         """
-        base = self._allocators[device].get_physical_block_id(absolute_id)
-        if device == Device.GPU and current_platform.is_hpu():
-            reserved_block = 1  # align with reserved blocks in create()
-        else:
-            reserved_block = 0
-        return base + reserved_block
+        base_block = (
+            self._allocators[device].get_physical_block_id(absolute_id)
+        )
+        reserved_block = RESERVED_BLOCKS if device == Device.GPU else 0
+
+        return base_block + reserved_block
 
     def swap(self, blocks: List[Block], src_device: Device,
              dst_device: Device) -> Dict[int, int]:
