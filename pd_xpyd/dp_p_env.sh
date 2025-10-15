@@ -44,6 +44,7 @@ export VLLM_SKIP_PREFILL_SAMPLING=1
 export VLLM_DP_SIZE=1
 export VLLM_USE_V1=0
 export VLLM_EP_SIZE=8
+export VLLM_DP_MASTER_PORT=25940
 
 # warmup settings
 export VLLM_SKIP_WARMUP=True
