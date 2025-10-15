@@ -2,9 +2,11 @@
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/pd_env.sh
 
+INFO="please input P instance number, D instance number, TP size of P instance, TP size of D instance, advanced/basic/benchmark proxy mode"
+
 if [ -z "$1" ]; then
-    echo "please input P instance number, D instance number, TP size of D instance, advanced/basic/benchmark proxy mode"
-    echo "run with default mode P=1, D=2, TP size=1, advanced"
+    echo $INFO
+    echo "run with default mode P=1, D=2, P/D TP size=8/1, advanced"
     P_INSTANCE_NUMBER=1
     D_INSTANCE_NUMBER=2
     NUM_DECODE=8
@@ -13,8 +15,8 @@ else
 fi
 
 if [ -z "$2" ]; then
-    echo "please input P instance number, D instance number, TP size of D instance, advanced/basic/benchmark proxy mode"
-    echo "run with P=$P_INSTANCE_NUMBER, D=2, TP size=1, advanced"
+    echo $INFO
+    echo "run with P=$P_INSTANCE_NUMBER, D=2, P/D TP size=8/1, advanced"
     D_INSTANCE_NUMBER=2
     TP_SIZE=1
     NUM_DECODE=$((8 / TP_SIZE))
@@ -23,28 +25,26 @@ else
 fi
 
 if [ -z "$3" ]; then
-    echo "please input P instance number, D instance number, TP size of D instance, advanced/basic/benchmark proxy mode"
-    echo "run with P=$P_INSTANCE_NUMBER, D=$D_INSTANCE_NUMBER, TP size=1, advanced"
+    echo $INFO
+    echo "run with P=$P_INSTANCE_NUMBER, D=$D_INSTANCE_NUMBER, P/D TP size=8/1, advanced"
+    TP_SIZE=8
+    NUM_PREFILL=$((8 / TP_SIZE))
+else
+    TP_SIZE=$3
+    NUM_PREFILL=$((8 / TP_SIZE))
+fi
+
+if [ -z "$4" ]; then
+    echo $INFO
+    echo "run with P=$P_INSTANCE_NUMBER, D=$D_INSTANCE_NUMBER, P TP size=$NUM_PREFILL, D TP size=1, advanced"
     TP_SIZE=1
     NUM_DECODE=$((8 / TP_SIZE))
 else
-    TP_SIZE=$3
+    TP_SIZE=$4
     NUM_DECODE=$((8 / TP_SIZE))
 fi
 
 PROXY_MODE=0
-
-if [ "$4" == "benchmark" ]; then
-    PROXY_MODE=2
-    echo " Benchmark mode enabled"
-fi
-
-if [ "$4" == "basic" ]; then
-    PROXY_MODE=1
-    echo " Basic mode enabled"
-fi
-
-# For backward compatibility.....
 
 if [ "$5" == "benchmark" ]; then
     PROXY_MODE=2
@@ -74,18 +74,26 @@ for ((i=0; i<$NUM_DECODE; i++)); do
 done
 
 #For OAM
-PREFILL_IPS=("10.239.129.9" "10.239.129.67" "10.239.129.21" "10.239.128.165" "10.239.128.244" "10.239.128.153")
+PREFILL_IPS=("10.239.129.9" "10.239.129.81" "10.239.129.21" "10.239.128.165" "10.239.128.244" "10.239.128.153")
 #For PCIE
 # PREFILL_IPS=("10.112.110.157")
 
 PBASE_PORT=8100
 PREFILL_ARGS=""
 
-PORT=$PBASE_PORT
-for ((i=0; i<P_INSTANCE_NUMBER; i++)); do
-    IP=${PREFILL_IPS[$i]}
-    PREFILL_ARGS="$PREFILL_ARGS ${IP}:${PORT}"
+for ((i=0; i<$NUM_PREFILL; i++)); do
+    PORT=$((PBASE_PORT + i))
+    for ((j=0; j<P_INSTANCE_NUMBER; j++)); do
+        IP=${PREFILL_IPS[$j]}
+        PREFILL_ARGS="$PREFILL_ARGS ${IP}:${PORT}"
+    done
 done
+
+#PORT=$PBASE_PORT
+#for ((i=0; i<P_INSTANCE_NUMBER; i++)); do
+#    IP=${PREFILL_IPS[$i]}
+#    PREFILL_ARGS="$PREFILL_ARGS ${IP}:${PORT}"
+#done
 
 if [ "$PROXY_MODE" == 2 ]; then
     CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_benchmark.py \
