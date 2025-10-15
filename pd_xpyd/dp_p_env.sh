@@ -9,12 +9,12 @@ export VLLM_GPU_MEMORY_UTILIZATION=0.7
 export VLLM_GRAPH_RESERVED_MEM=0.1
 export VLLM_GRAPH_PROMPT_RATIO=1
 # params
-model_len=16384
-max_num_batched_tokens=16384
-max_num_seqs=8
+model_len=4096
+max_num_batched_tokens=4096
+max_num_seqs=2
 input_min=128
-input_max=16384
-output_max=16384
+input_max=4096
+output_max=4096
 
 # ***************************************  bucketing ******************************************* #
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
@@ -44,6 +44,7 @@ export VLLM_SKIP_PREFILL_SAMPLING=1
 export VLLM_DP_SIZE=1
 export VLLM_USE_V1=0
 export VLLM_EP_SIZE=8
+export VLLM_DP_MASTER_IP=10.239.129.9
 export VLLM_DP_MASTER_PORT=25940
 
 # warmup settings
