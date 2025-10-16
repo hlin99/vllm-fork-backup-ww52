@@ -83,7 +83,7 @@ fi
 if [ "$INC_FP8" -eq 1 ]; then
   model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2/
 else
-  model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2-static/
+  model_path=/mnt/disk2/hf_models/DeepSeek-V3.1-Terminus-G2-static/
 fi
 
 if [ "$INC_FP8" -eq 1 ]; then
