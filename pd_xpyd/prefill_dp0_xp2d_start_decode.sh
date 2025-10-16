@@ -1,7 +1,6 @@
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 
 source "$BASH_DIR"/start_etcd_mooncake_master.sh
-sleep 10s
 
 if [ -z "$1" ]; then
     echo "please input the tp size"
