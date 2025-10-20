@@ -15,8 +15,8 @@ model_len=16384
 max_num_batched_tokens=16384
 max_num_seqs=64
 input_min=128
-input_max=16384
-output_max=16384
+input_max=2048
+output_max=16
 
 # ***************************************  bucketing ******************************************* #
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
@@ -34,8 +34,8 @@ export VLLM_PROMPT_SEQ_BUCKET_STEP=128
 export VLLM_PROMPT_SEQ_BUCKET_MAX=1
 
 #export VLLM_DECODE_BLOCK_BUCKET_MIN=2048
-#export VLLM_DECODE_BS_BUCKET_STEP=2
-#export VLLM_DECODE_BLOCK_BUCKET_STEP=2
+export VLLM_DECODE_BS_BUCKET_STEP=64
+export VLLM_DECODE_BLOCK_BUCKET_STEP=128
 
 echo " environments are reseted "
 
@@ -56,7 +56,8 @@ export VLLM_EP_SIZE=16
 
 # warmup settings
 export VLLM_SKIP_WARMUP=True
-#export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_d_cache,false,131072
+#unset VLLM_SKIP_WARMUP
+export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_d_cache1,false,131072
 
 # MoE settings
 export VLLM_SUPPORT_MOE_CHUNK="true"

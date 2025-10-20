@@ -6,15 +6,15 @@ source "$BASH_DIR"/pd_env.sh
 
 
 export VLLM_GPU_MEMORY_UTILIZATION=0.7
-export VLLM_GRAPH_RESERVED_MEM=0.1
+export VLLM_GRAPH_RESERVED_MEM=0.6
 export VLLM_GRAPH_PROMPT_RATIO=1
 # params
-model_len=4096
-max_num_batched_tokens=4096
-max_num_seqs=2
-input_min=128
-input_max=4096
-output_max=4096
+model_len=16384
+max_num_batched_tokens=16384
+max_num_seqs=8
+input_min=1536
+input_max=2048
+output_max=2048
 
 # ***************************************  bucketing ******************************************* #
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
@@ -24,6 +24,7 @@ unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLO
 
 set_bucketing
 
+export VLLM_PROMPT_SEQ_BUCKET_STEP=1024
 export VLLM_DECODE_BS_BUCKET_MIN=1
 export VLLM_DECODE_BS_BUCKET_STEP=1
 export VLLM_DECODE_BS_BUCKET_MAX=1
@@ -49,7 +50,8 @@ export VLLM_DP_MASTER_PORT=25940
 
 # warmup settings
 export VLLM_SKIP_WARMUP=True
-#export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_p_cache,false,131072
+#unset VLLM_SKIP_WARMUP
+export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_p_cache1,false,131072
 
 # MoE settings
 export VLLM_SUPPORT_MOE_CHUNK="false"  # Can be true after following para are tuned.
