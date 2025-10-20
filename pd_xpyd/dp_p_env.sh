@@ -5,8 +5,8 @@ source "$BASH_DIR"/pd_bucket.sh
 source "$BASH_DIR"/pd_env.sh
 
 
-export VLLM_GPU_MEMORY_UTILIZATION=0.7
-export VLLM_GRAPH_RESERVED_MEM=0.6
+export VLLM_GPU_MEMORY_UTILIZATION=0.6
+export VLLM_GRAPH_RESERVED_MEM=0.3
 export VLLM_GRAPH_PROMPT_RATIO=1
 # params
 model_len=16384
