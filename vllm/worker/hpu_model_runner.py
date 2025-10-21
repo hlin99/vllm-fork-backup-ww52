@@ -985,10 +985,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.kv_conf is None or not is_prompt or not self.kv_conf.is_kv_consumer
         ):
             if self.is_driver_worker:
-                print(f"rank {torch.distributed.get_rank()} before align_dp_groups batch_size_padded {batch_size_padded}")
                 batch_size_padded = align_dp_groups(
                     batch_size_padded, torch.distributed.ReduceOp.MAX)
-                print(f"rank {torch.distributed.get_rank()} end align_dp_groups batch_size_padded {batch_size_padded}")
             if align_worker:
                 batch_size_padded = align_tp_groups(
                     batch_size_padded, torch.distributed.ReduceOp.MAX)
@@ -1218,10 +1216,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if self.dp_awared_padding and\
             (self.kv_conf is None or self.kv_conf.is_kv_producer):
             if self.is_driver_worker:
-                print(f"rank {torch.distributed.get_rank()} before align_dp_groups max_prompt_len {max_prompt_len}")
                 max_prompt_len = align_dp_groups(
                     max_prompt_len, torch.distributed.ReduceOp.MAX)
-                print(f"rank {torch.distributed.get_rank()} end align_dp_groups max_prompt_len {max_prompt_len}")
             if align_worker:
                 max_prompt_len = align_tp_groups(
                     max_prompt_len, torch.distributed.ReduceOp.MAX)
@@ -1493,10 +1489,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 block_bucket_size)
             if self.dp_awared_padding:
                 if self.is_driver_worker:
-                    print(f"rank {torch.distributed.get_rank()} before align_dp_groups block_bucket_size {block_bucket_size}")
                     block_bucket_size = align_dp_groups(
                         block_bucket_size, torch.distributed.ReduceOp.MAX)
-                    print(f"rank {torch.distributed.get_rank()} end align_dp_groups block_bucket_size {block_bucket_size}")
                 if align_worker:
                     block_bucket_size = align_tp_groups(
                         block_bucket_size, torch.distributed.ReduceOp.MAX)
@@ -1511,10 +1505,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 len(block_list))
             if self.dp_awared_padding:
                 if self.is_driver_worker:
-                    print(f"rank {torch.distributed.get_rank()} before align_dp_groups block_bucket_size {block_bucket_size}")
                     block_bucket_size = align_dp_groups(
                         block_bucket_size, torch.distributed.ReduceOp.MAX)
-                    print(f"rank {torch.distributed.get_rank()} end align_dp_groups block_bucket_size {block_bucket_size}")
                 if align_worker:
                     block_bucket_size = align_tp_groups(
                         block_bucket_size, torch.distributed.ReduceOp.MAX)
@@ -1550,10 +1542,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 real_batch_size, False)
             if self.dp_awared_padding:
                 if self.is_driver_worker:
-                    print(f"rank {torch.distributed.get_rank()} before align_dp_groups batch_size_padded {batch_size_padded}")
                     batch_size_padded = align_dp_groups(
                         batch_size_padded, torch.distributed.ReduceOp.MAX)
-                    print(f"rank {torch.distributed.get_rank()} end align_dp_groups batch_size_padded {batch_size_padded}")
                 if align_worker:
                     batch_size_padded = align_tp_groups(
                         batch_size_padded, torch.distributed.ReduceOp.MAX)
@@ -1974,7 +1964,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if self.vllm_config.kv_transfer_config is not None and \
             self.vllm_config.kv_transfer_config.is_kv_producer:
             is_prompt = True
-        print(f"rank {torch.distributed.get_rank()} _dummy_run max_num_batched_tokens {max_num_batched_tokens} is_prompt {is_prompt}")
         self.warmup_scenario(max_num_batched_tokens, 1, is_prompt, None, False,
                              True, False, 0, 1, True, True)
         return
@@ -2005,7 +1994,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         dummy_lora_requests: List[LoRARequest] = []
         dummy_lora_requests_per_seq: List[LoRARequest] = []
         if self.lora_config and is_lora_profile_run:
-            print(f"rank {torch.distributed.get_rank()} warmup lora")
             assert self.lora_manager is not None
             with self.lora_manager.dummy_lora_cache():
                 for idx in range(self.lora_config.max_loras):
@@ -2059,7 +2047,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             additional_inputs = {}
             if self.model_type in ("medusa", "mlp_speculator", "eagle",
                                    "deepseek_mtp"):
-                print("???")
                 input_tokens = inputs.input_tokens
                 assert input_tokens is not None
                 bs = input_tokens.shape[0]
