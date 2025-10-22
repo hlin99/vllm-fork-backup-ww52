@@ -12,7 +12,7 @@ export VLLM_GRAPH_PROMPT_RATIO=1
 model_len=16384
 max_num_batched_tokens=16384
 max_num_seqs=8
-input_min=1536
+input_min=1024
 input_max=2048
 output_max=2048
 
@@ -50,7 +50,7 @@ export VLLM_DP_MASTER_PORT=25940
 
 # warmup settings
 export VLLM_SKIP_WARMUP=True
-#unset VLLM_SKIP_WARMUP
+unset VLLM_SKIP_WARMUP
 export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_p_cache1,false,131072
 
 # MoE settings

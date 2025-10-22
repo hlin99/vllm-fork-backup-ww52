@@ -3,8 +3,8 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/pd_bucket.sh
 source "$BASH_DIR"/pd_env.sh
 
-export VLLM_GPU_MEMORY_UTILIZATION=0.7
-export VLLM_GRAPH_RESERVED_MEM=0.3
+export VLLM_GPU_MEMORY_UTILIZATION=0.5
+export VLLM_GRAPH_RESERVED_MEM=0.5
 export VLLM_GRAPH_PROMPT_RATIO=0
 
 # enable delayed samping on decode
@@ -35,7 +35,7 @@ export VLLM_PROMPT_SEQ_BUCKET_MAX=1
 
 #export VLLM_DECODE_BLOCK_BUCKET_MIN=2048
 export VLLM_DECODE_BS_BUCKET_STEP=64
-export VLLM_DECODE_BLOCK_BUCKET_STEP=128
+export VLLM_DECODE_BLOCK_BUCKET_STEP=256
 
 echo " environments are reseted "
 
@@ -56,7 +56,7 @@ export VLLM_EP_SIZE=16
 
 # warmup settings
 export VLLM_SKIP_WARMUP=True
-#unset VLLM_SKIP_WARMUP
+unset VLLM_SKIP_WARMUP
 export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_d_cache1,false,131072
 
 # MoE settings
