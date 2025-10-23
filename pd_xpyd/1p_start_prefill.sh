@@ -35,10 +35,12 @@ CMD=(
     --disable-async-output-proc
     --disable-log-requests
     --max-num-batched-tokens "$max_num_batched_tokens"
-    --use-padding-aware-scheduling
+    --use-padding-aware-scheduling false
     --use-v2-block-manager
     --distributed_executor_backend mp
     $kv_cache_dtype_arg
+    --prefill-chunk-size 512
+    --enable-chunked-prefill
     --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}'
 )
 
