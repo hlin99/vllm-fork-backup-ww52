@@ -921,21 +921,55 @@ class ProxyServer:
                 raise ValueError(
                     f"Invalid instance {instance}: {str(e)}") from e
 
-    def verify_model_config(self, instances: list, model: str) -> None:
+    def verify_model_config(self, instances: list, model: str) -> int:
+        """
+        Verify that all instances serve the same model, and
+        return the minimum 'max_model_len' among them.
+
+        Args:
+            instances (list): list of instance addresses (e.g., ["10.0.0.1:8000", "10.0.0.2:8000"])
+            model (str): expected model name or ID
+
+        Returns:
+            int: the minimum max_model_len value among all instances
+
+        Raises:
+            ValueError: if any instance serves a different model or is unreachable
+        """
+        min_model_len = None
+
         for instance in instances:
+            url = f"http://{instance}/v1/models"
             try:
-                response = requests.get(f"http://{instance}/v1/models")
+                response = requests.get(url, timeout=5)
                 if response.status_code == 200:
-                    model_cur = response.json()["data"][0]["id"]
+                    data = response.json()["data"][0]
+                    model_cur = data.get("id", "")
+                    model_len = data.get("max_model_len", None)
+
                     if model_cur != model:
                         raise ValueError(
-                            f"{instance} serves a different model: "
-                            f"{model_cur} != {model}")
+                            f"{instance} serves a different model: {model_cur} != {model}"
+                        )
+
+                    if model_len is None:
+                        raise ValueError(f"{instance} did not return 'max_model_len'!")
+                    else:
+                        logger.info(f"Instance {instance}: model_len={model_len}")
+                    # Keep track of the minimum model length
+                    if min_model_len is None or model_len < min_model_len:
+                        min_model_len = model_len
+
                 else:
-                    raise ValueError(f"Cannot get model id from {instance}!")
+                    raise ValueError(f"Cannot get model info from {instance} (status {response.status_code})!")
+
             except requests.RequestException as e:
-                raise ValueError(
-                    f"Error communicating with {instance}: {str(e)}") from e
+                raise ValueError(f"Error communicating with {instance}: {str(e)}") from e
+
+        if min_model_len is None:
+            raise ValueError("No valid model_len information found from any instance!")
+
+        return min_model_len
 
     def run_server(self):
         app = FastAPI()
