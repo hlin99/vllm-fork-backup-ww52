@@ -13,7 +13,6 @@ echo "Using Mooncake config: $MOONCAKE_CONFIG_PATH"
 
 source "$BASH_DIR"/dp_p_env.sh
 
-
 if [ "$INC_FP8" -eq 1 ]; then
   kv_cache_dtype_arg="--kv-cache-dtype fp8_inc"
   echo "<prefill>it's inc fp8 kv cache mode"
@@ -35,10 +34,12 @@ CMD=(
     --disable-async-output-proc
     --disable-log-requests
     --max-num-batched-tokens "$max_num_batched_tokens"
-    --use-padding-aware-scheduling
+    --use-padding-aware-scheduling false
     --use-v2-block-manager
     --distributed_executor_backend mp
     $kv_cache_dtype_arg
+    --enable-chunked-prefill
+    --prefill-chunk-size 8192
     --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}'
 )
 
