@@ -5,8 +5,8 @@ source "$BASH_DIR"/pd_bucket.sh
 source "$BASH_DIR"/pd_env.sh
 
 
-export VLLM_GPU_MEMORY_UTILIZATION=0.36
-export VLLM_GRAPH_RESERVED_MEM=0.034
+export VLLM_GPU_MEMORY_UTILIZATION=0.343629
+export VLLM_GRAPH_RESERVED_MEM=0.02
 export VLLM_GRAPH_PROMPT_RATIO=1
 # params
 model_len=131072
@@ -34,6 +34,9 @@ export VLLM_DECODE_BLOCK_BUCKET_MAX=2
 
 echo " environments are reseted "
 
+#export VLLM_USE_FP8_MATMUL=true
+export VLLM_CONTIGUOUS_PA=false
+
 env | grep VLLM_PROMPT_BS
 env | grep VLLM_PROMPT_SEQ
 env | grep VLLM_DECODE_BS
@@ -47,7 +50,7 @@ export VLLM_USE_V1=0
 export VLLM_EP_SIZE=8
 
 # warmup settings
-export VLLM_SKIP_WARMUP=True
+export VLLM_SKIP_WARMUP=true
 #unset VLLM_SKIP_WARMUP
 export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_p_cache,false,131072
 
