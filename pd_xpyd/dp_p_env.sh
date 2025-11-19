@@ -5,16 +5,19 @@ source "$BASH_DIR"/pd_bucket.sh
 source "$BASH_DIR"/pd_env.sh
 
 
-export VLLM_GPU_MEMORY_UTILIZATION=0.36
-export VLLM_GRAPH_RESERVED_MEM=0.034
+export VLLM_GPU_MEMORY_UTILIZATION=0.343629
+export VLLM_GRAPH_RESERVED_MEM=0.02
 export VLLM_GRAPH_PROMPT_RATIO=1
+
 # params
 model_len=131072
 max_num_batched_tokens=8192
-max_num_seqs=16
+max_num_seqs=64
 input_min=128
-input_max=8192
+input_max=128
 output_max=8192
+
+export VLLM_CONTIGUOUS_PA=false
 
 # ***************************************  bucketing ******************************************* #
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
@@ -23,7 +26,7 @@ unset VLLM_DECODE_BS_BUCKET_MIN VLLM_DECODE_BS_BUCKET_STEP VLLM_DECODE_BS_BUCKET
 unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLOCK_BUCKET_MAX
 
 set_bucketing
-export VLLM_PROMPT_SEQ_BUCKET_STEP=1024
+export VLLM_PROMPT_SEQ_BUCKET_STEP=4096
 
 export VLLM_DECODE_BS_BUCKET_MIN=1
 export VLLM_DECODE_BS_BUCKET_STEP=1
