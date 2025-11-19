@@ -39,7 +39,7 @@ CMD=(
     --distributed_executor_backend mp
     $kv_cache_dtype_arg
     --enable-chunked-prefill
-    --prefill-chunk-size 8192
+    --prefill-chunk-size "$max_num_batched_tokens"
     --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}'
 )
 
