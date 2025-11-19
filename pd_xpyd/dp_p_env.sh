@@ -5,14 +5,14 @@ source "$BASH_DIR"/pd_bucket.sh
 source "$BASH_DIR"/pd_env.sh
 
 
-export VLLM_GPU_MEMORY_UTILIZATION=0.3475
-export VLLM_GRAPH_RESERVED_MEM=0.0311
+export VLLM_GPU_MEMORY_UTILIZATION=0.6
+export VLLM_GRAPH_RESERVED_MEM=0.43823
 export VLLM_GRAPH_PROMPT_RATIO=1
 
 # params
 model_len=131072
 max_num_batched_tokens=8192
-max_num_seqs=16
+max_num_seqs=8
 input_min=128
 input_max=8192
 output_max=8192
