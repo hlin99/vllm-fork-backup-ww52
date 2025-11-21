@@ -9,14 +9,14 @@ export VLLM_GPU_MEMORY_UTILIZATION=0.7
 export VLLM_GRAPH_RESERVED_MEM=0.1
 export VLLM_GRAPH_PROMPT_RATIO=1
 # params
-model_len=16384
+model_len=131072
 max_num_batched_tokens=16384
 max_num_seqs=8
 input_min=128
 input_max=16384
 output_max=16384
 
-export VLLM_CONTIGUOUS_PA=true
+unset VLLM_CONTIGUOUS_PA VLLM_PADDING_AWARE_IN_CHUNKED_PREFILL
 CHUNKED_PREFILL_ENABLED=0
 
 if [[ "$model_len" -eq 131072 ]]; then
@@ -33,7 +33,7 @@ if [[ "$model_len" -eq 131072 ]]; then
     export VLLM_GPU_MEMORY_UTILIZATION=0.6
     export VLLM_GRAPH_RESERVED_MEM=0.43823
     export VLLM_GRAPH_PROMPT_RATIO=1
-
+    export VLLM_PADDING_AWARE_IN_CHUNKED_PREFILL=1
     max_num_batched_tokens=8192
     max_num_seqs=16
     input_min=128
@@ -78,7 +78,8 @@ export VLLM_EP_SIZE=8
 
 # warmup settings
 export VLLM_SKIP_WARMUP=True
-#export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_p_cache,false,131072
+unset VLLM_SKIP_WARMUP
+export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_p_cache,false,131072
 
 # MoE settings
 export VLLM_SUPPORT_MOE_CHUNK="false"  # Can be true after following para are tuned.
