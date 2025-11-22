@@ -9,7 +9,7 @@ export VLLM_GPU_MEMORY_UTILIZATION=0.7
 export VLLM_GRAPH_RESERVED_MEM=0.1
 export VLLM_GRAPH_PROMPT_RATIO=1
 # params
-model_len=131072
+model_len=163840
 max_num_batched_tokens=16384
 max_num_seqs=8
 input_min=128
@@ -39,7 +39,28 @@ if [[ "$model_len" -eq 131072 ]]; then
     input_min=128
     input_max=8192
     output_max=8192
+fi
 
+if [[ "$model_len" -eq 163840 ]]; then
+    echo "model_len is 160K"
+    if [[ "$INC_FP8" -ne 1 ]]; then
+        echo "Error: INC_FP8 must be 1 when model_len is 131072, change INF_FP8 in pd_env.sh" >&2
+        while true; do
+            sleep 60
+        done
+    fi
+
+    CHUNKED_PREFILL_ENABLED=1
+    export VLLM_CONTIGUOUS_PA=false
+    export VLLM_GPU_MEMORY_UTILIZATION=0.7
+    export VLLM_GRAPH_RESERVED_MEM=0.43
+    export VLLM_GRAPH_PROMPT_RATIO=1
+    export VLLM_PADDING_AWARE_IN_CHUNKED_PREFILL=1
+    max_num_batched_tokens=4096
+    max_num_seqs=16
+    input_min=128
+    input_max=4096
+    output_max=4096
 fi
 
 # ***************************************  bucketing ******************************************* #
@@ -57,7 +78,7 @@ export VLLM_DECODE_BLOCK_BUCKET_MIN=2
 export VLLM_DECODE_BLOCK_BUCKET_STEP=1
 export VLLM_DECODE_BLOCK_BUCKET_MAX=2
 
-if [[ "$model_len" -eq 131072 ]]; then
+if [[ "$model_len" -eq 131072 || "$model_len" -eq 163840 ]]; then
     export VLLM_PROMPT_SEQ_BUCKET_STEP=4096
     export VLLM_PROMPT_BS_BUCKET_STEP=2
 fi
