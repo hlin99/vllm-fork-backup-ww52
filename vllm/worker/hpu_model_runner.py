@@ -1072,6 +1072,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             logger.warning(
                 "Configuration: (%s, %s, %s, %s) was not warmed-up!", phase,
                 batch_size, seq_len, num_blocks)
+        else:
+            logger.warning(
+                "Configuration: (%s, %s, %s, %s) was warmed-up!", phase,
+                batch_size, seq_len, num_blocks)
 
     def _prepare_prompt(
         self,

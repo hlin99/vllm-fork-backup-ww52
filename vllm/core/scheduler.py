@@ -202,7 +202,7 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
         result = num_new_padded_tokens <= self.token_budget
         if self.max_num_prefill_seqs is not None and result:
             result = self._num_curr_prefill_seqs + num_new_seqs \
-                <= self.max_num_prefill_seqs
+                <= 1
         return result
 
     @property
@@ -431,6 +431,7 @@ class Scheduler:
         need_fetch_kv: bool = False,
     ) -> None:
         self.scheduler_config = scheduler_config
+        self.in_chunked_status = False
 
         overwrite = bool(
             int(os.environ.get("VLLM_PADDING_AWARE_IN_CHUNKED_PREFILL", 0))
@@ -811,7 +812,7 @@ class Scheduler:
                 break
 
             running_queue.popleft()
-
+            print("~~~~~~~~~~~~~~~~~~~~seq_group.get_len()=", seq_group.seqs[0].get_len())
             # With async postprocessor, an extra decode run is done
             # to process the final tokens. The check below avoids this extra
             # decode run when the model max len is reached, in order to avoid
@@ -1153,6 +1154,11 @@ class Scheduler:
             seq_group = waiting_queue[0]
 
             waiting_seqs = seq_group.get_seqs(status=SequenceStatus.WAITING)
+            if waiting_seqs:
+                print("################################### debug+++ ###################################")
+                print("waiting_seqs[0].get_len()=", waiting_seqs[0].get_len())
+                print("################################### debug--- ###################################")
+
             assert len(waiting_seqs) == 1, (
                 "Waiting sequence group should have only one prompt "
                 "sequence.")
@@ -1160,6 +1166,9 @@ class Scheduler:
                 self._get_num_new_uncached_and_cached_tokens(
                     seq_group, SequenceStatus.WAITING, enable_chunking,
                     budget))
+            if num_new_tokens_uncached == 0:
+                print("num_new_tokens_uncached == 0, break")
+                break;
             num_new_tokens = num_new_tokens_uncached + num_new_tokens_cached
 
             if not enable_chunking:
@@ -1225,16 +1234,23 @@ class Scheduler:
                 'num_new_tokens': num_new_tokens_uncached,
                 'num_new_seqs': num_new_seqs
             }
+            print("<can_schedule_kwargs A> num_new_tokens_uncached, num_new_seqs=", num_new_tokens_uncached, num_new_seqs)
             if self.scheduler_config.use_padding_aware_scheduling:
                 max_prefill_seq_len = max(
                     [seq.get_num_new_tokens() for seq in seq_group.get_seqs()])
                 can_schedule_kwargs['is_prefill'] = True
                 if (self.scheduler_config.chunked_prefill_enabled and
                         self.scheduler_config.prefill_chunk_size):
+                    print("<can_schedule_kwargs B1> max_prefill_seq_len=", max_prefill_seq_len)
+
                     max_prefill_seq_len = min(
                             max_prefill_seq_len, self.scheduler_config.prefill_chunk_size
                     )
+                    print("<can_schedule_kwargs B2> max_prefill_seq_len=", max_prefill_seq_len)
+
                 can_schedule_kwargs['max_seq_len'] = max_prefill_seq_len
+                print("<can_schedule_kwargs C> max_prefill_seq_len=", max_prefill_seq_len)
+
             if (num_new_tokens_uncached == 0
                     or not budget.can_schedule(**can_schedule_kwargs)):
                 print("break!!! num_new_tokens_uncached=", num_new_tokens_uncached)
@@ -1282,6 +1298,13 @@ class Scheduler:
         if len(seq_groups) > 0:
             self.prev_prompt = True
 
+        for i, sg in enumerate(seq_groups):
+            # 取出原始 SequenceGroup
+            original_sg = sg.seq_group
+            print(f"\nScheduledSequenceGroup[{i}] contains {len(original_sg.seqs)} request(s)")
+            for j, seq in enumerate(original_sg.seqs):
+                seq_len = seq.get_len()
+                print(f"  request[{j}] length={seq_len}")
         return SchedulerPrefillOutputs(
             seq_groups=seq_groups,
             ignored_seq_groups=ignored_seq_groups,
@@ -2029,23 +2052,55 @@ class Scheduler:
             # Chunk if a running request cannot fit in the given budget.
             # If number of seq > 1, it means it is doing beam search
             # in a decode phase. Do not chunk.
+            #for i, seq in enumerate(seq_group.seqs):
+            #    print(f"=== seq {i} ===")
+            #    print(dir(seq))
+            def has_been_chunked(seq):
+                num_prefilled = seq.get_num_computed_tokens()
+                chunked = seq.read_offset > 0 or seq.prefix_offset > 0 or num_prefilled > 0
+
+                if chunked:
+                    print(f"seq_id={getattr(seq, 'seq_id', None)} has been chunked:")
+                    print(f"  read_offset = {seq.read_offset}")
+                    print(f"  prefix_offset = {seq.prefix_offset}")
+                    print(f"  num_prefilled_tokens = {num_prefilled}")
+
+                return chunked
+            
+            is_chunked = has_been_chunked(seq)
+
+            if is_chunked:
+                print(f"seq_id={seq.seq_id} has been chunked")
+            else:
+                print(f"seq_id={seq.seq_id} has NOT been chunked")
+            #for seq in seq_group.seqs:
+            #    print("seq=",seq)
+            #    print("seq_id:", getattr(seq, "seq_id", None))
+            #    print("  total_len:", getattr(seq, "total_len", None))
+            #    print("  num_prefilled_tokens:", getattr(seq, "num_prefilled_tokens", None))
+            #    print("  remaining_prefill_tokens:", getattr(seq, "remaining_prefill_tokens", None))
+            #    print("  arrival_time:", getattr(seq, "arrival_time", None))
+            #    print("  other_attrs:", {k: getattr(seq, k) for k in dir(seq) if not k.startswith("_")})
+
             num_uncached_new_tokens = self._chunk_new_tokens_to_schedule(
                 self.scheduler_config,
                 self.cache_config,
                 budget,
                 self._get_prompt_limit(seq_group),
                 num_uncached_new_tokens,
+                is_chunked,
             )
-
+        print("&&&&&&&&&&&&&&&&&&&&&&&&& num_uncached_new_tokens, num_cached_new_tokens=", num_uncached_new_tokens, num_cached_new_tokens)
         return num_uncached_new_tokens, num_cached_new_tokens
 
-    @staticmethod
     def _chunk_new_tokens_to_schedule(
+        self,
         scheduler_config: SchedulerConfig,
         cache_config: CacheConfig,
         budget: SchedulingBudget,
         prompt_limit: int,
         num_new_tokens: int,
+        is_chunked=False
     ) -> int:
         """
         Chunks the number of new tokens to schedule based on the budget when
@@ -2108,11 +2163,20 @@ class Scheduler:
             assert scheduler_config.prefill_chunk_size % block_size == 0
             if remaining_token_budget >= scheduler_config.prefill_chunk_size:
                 remaining_token_budget = scheduler_config.prefill_chunk_size
+                if is_chunked:
+                    self.in_chunked_status = True
+                else:
+                    self.in_chunked_status = False
             else:
                 # If we sequence has to be chunked, we make sure the context
                 # blocks are multiple of prefill_chunk_size
-                if num_new_tokens > remaining_token_budget:
+                if (num_new_tokens > remaining_token_budget) or self.in_chunked_status:
+                    print("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$++++++++++++++++++++++++++++++")
+                    print("is_chunked, self.in_chunked_status=",is_chunked, self.in_chunked_status)
+                    print("num_new_tokens, remaining_token_budget=", num_new_tokens, remaining_token_budget)
+                    print("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$-------------------------------")
                     remaining_token_budget = 0
+                    
         num_new_tokens = min(num_new_tokens, remaining_token_budget)
 
         return num_new_tokens
