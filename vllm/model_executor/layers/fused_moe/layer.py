@@ -98,7 +98,7 @@ if is_rocm_aiter_moe_enabled():
         rocm_aiter_grouped_topk as grouped_topk_aiter,
     )
 else:
-    from vllm.model_executor.layers.fused_moe.fused_moe import grouped_topk
+    from vllm.model_executor.layers.fused_moe.fused_moe import GroupedTopk
 if current_platform.is_tpu():
     from .moe_pallas import fused_moe as fused_moe_pallas
 else:
@@ -2081,18 +2081,26 @@ class FusedMoE(CustomOp):
                 grouped_topk_impl = partial(
                     grouped_topk_aiter,
                     num_fused_shared_experts=num_fused_shared_experts,
+                    topk=top_k,
+                    renormalize=renormalize,
+                    num_expert_group=num_expert_group,
+                    topk_group=topk_group,
+                    scoring_func=scoring_func,
+                    routed_scaling_factor=routed_scaling_factor,
                 )
             else:
-                grouped_topk_impl = grouped_topk
+                grouped_topk_impl = GroupedTopk(
+                    topk=top_k,
+                    renormalize=renormalize,
+                    num_expert_group=num_expert_group,
+                    topk_group=topk_group,
+                    scoring_func=scoring_func,
+                    routed_scaling_factor=routed_scaling_factor,
+                )
+
             topk_weights, topk_ids = grouped_topk_impl(
                 hidden_states=hidden_states,
                 gating_output=router_logits,
-                topk=top_k,
-                renormalize=renormalize,
-                num_expert_group=num_expert_group,
-                topk_group=topk_group,
-                scoring_func=scoring_func,
-                routed_scaling_factor=routed_scaling_factor,
                 e_score_correction_bias=e_score_correction_bias,
             )
             if indices_type is not None:
