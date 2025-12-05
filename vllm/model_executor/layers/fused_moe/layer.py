@@ -1298,7 +1298,13 @@ class FusedMoE(CustomOp):
         if quant_config is None:
             self.activation_scheme = "none"
         else:
-            self.activation_scheme = quant_config.activation_scheme
+            import os
+
+            has_quant_config = os.getenv("QUANT_CONFIG", None) is not None
+            is_inc = vllm_config.model_config.quantization == "inc" or has_quant_config
+            self.activation_scheme = (
+                "none" if is_inc else quant_config.activation_scheme
+            )
 
         assert quant_method is not None
         assert isinstance(quant_method, FusedMoEMethodBase)
