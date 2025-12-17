@@ -57,7 +57,7 @@ async def async_request_tgi(
     assert api_url.endswith("generate_stream")
 
     async with aiohttp.ClientSession(
-        trust_env=True, timeout=AIOHTTP_TIMEOUT
+        timeout=AIOHTTP_TIMEOUT
     ) as session:
         params = {
             "max_new_tokens": request_func_input.output_len,
@@ -138,7 +138,7 @@ async def async_request_trt_llm(
     assert api_url.endswith("generate_stream")
 
     async with aiohttp.ClientSession(
-        trust_env=True, timeout=AIOHTTP_TIMEOUT
+        timeout=AIOHTTP_TIMEOUT
     ) as session:
         payload = {
             "accumulate_tokens": True,
@@ -211,7 +211,7 @@ async def async_request_deepspeed_mii(
     )
 
     async with aiohttp.ClientSession(
-        trust_env=True, timeout=AIOHTTP_TIMEOUT
+        timeout=AIOHTTP_TIMEOUT
     ) as session:
         payload = {
             "model": request_func_input.model,
@@ -274,7 +274,7 @@ async def async_request_openai_completions(
     )
 
     async with aiohttp.ClientSession(
-        trust_env=True, timeout=AIOHTTP_TIMEOUT
+        timeout=AIOHTTP_TIMEOUT
     ) as session:
         payload = {
             "model": request_func_input.model_name
@@ -374,7 +374,7 @@ async def async_request_openai_chat_completions(
     )
 
     async with aiohttp.ClientSession(
-        trust_env=True, timeout=AIOHTTP_TIMEOUT
+        timeout=AIOHTTP_TIMEOUT
     ) as session:
         content = [{"type": "text", "text": request_func_input.prompt}]
         if request_func_input.multi_modal_content:
@@ -487,7 +487,7 @@ async def async_request_openai_audio(
     "or `translations`."
 
     async with aiohttp.ClientSession(
-        trust_env=True, timeout=AIOHTTP_TIMEOUT
+        timeout=AIOHTTP_TIMEOUT
     ) as session:
         content = [{"type": "text", "text": request_func_input.prompt}]
         payload = {
