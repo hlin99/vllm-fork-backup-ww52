@@ -1356,7 +1356,8 @@ class EngineArgs:
             self.enable_prefix_caching = False
 
         assert self.enable_chunked_prefill is not None
-
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~self.enable_chunked_prefill = ", self.enable_chunked_prefill)
+        self.enable_chunked_prefill = False
         sliding_window: int | None = None
         if not is_interleaved(model_config.hf_text_config):
             # Only set CacheConfig.sliding_window if the model is all sliding
