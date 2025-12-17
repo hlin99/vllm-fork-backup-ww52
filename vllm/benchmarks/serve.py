@@ -521,7 +521,6 @@ async def benchmark(
 
     session = aiohttp.ClientSession(
         connector=connector,
-        trust_env=True,
         timeout=aiohttp.ClientTimeout(total=6 * 60 * 60),
     )
 
