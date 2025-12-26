@@ -101,7 +101,7 @@ if [ "$PROXY_MODE" == 2 ]; then
         --decode $DECODE_ARGS \
         --port 8868 \
         --repeat_p_request 1 \
-        --repeat_d_times 639 \
+        --repeat_d_times 511 \
         --benchmark_mode"
 elif [ "$PROXY_MODE" == 3 ]; then
     CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_demo_benchmark_decode_n_prompts.py \

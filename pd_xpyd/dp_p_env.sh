@@ -9,12 +9,12 @@ export VLLM_GRAPH_RESERVED_MEM=0.1
 export VLLM_GRAPH_PROMPT_RATIO=1
 
 # params
-model_len=16384
-max_num_batched_tokens=16384
+model_len=2048
+max_num_batched_tokens=8192
 max_num_seqs=8
 input_min=128
-input_max=16384
-output_max=16384
+input_max=1024
+output_max=2048
 
 unset VLLM_CONTIGUOUS_PA VLLM_PADDING_AWARE_IN_CHUNKED_PREFILL
 CHUNKED_PREFILL_ENABLED=0
@@ -71,7 +71,9 @@ unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLO
 
 # Set limit to 0 for getting best perf
 # Set limit to 0.1 to balance perf and warmup time
-export BUCKET_PADDING_RATIO=0.1
+unset BUCKET_PADDING_RATIO
+export VLLM_PROMPT_BS_BUCKET_LIMIT=0
+export VLLM_PROMPT_BLOCK_BUCKET_LIMIT=0
 
 set_bucketing
 
@@ -102,7 +104,7 @@ export VLLM_USE_V1=0
 export VLLM_EP_SIZE=8
 
 # warmup settings
-#export VLLM_SKIP_WARMUP=True
+unset VLLM_SKIP_WARMUP
 if [ "$INC_FP8" -eq 1 ]; then
   export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_fp8_inc_p_cache,false,262144,false
 else

@@ -1,8 +1,6 @@
 #!/bin/bash
 #set -x
 
-sleep 60
-
 # machine id, EP, TP, DP Index, DP Host IP
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/dp_d_env.sh

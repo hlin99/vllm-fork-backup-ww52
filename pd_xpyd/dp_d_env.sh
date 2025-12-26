@@ -17,13 +17,14 @@ export VLLM_GRAPH_PROMPT_RATIO=0
 export VLLM_DELAYED_SAMPLING="true"
 
 # params
-model_len=16384
-max_num_batched_tokens=16384
-max_num_seqs=64
-input_min=128
-input_max=16384
-output_max=16384
+model_len=4096
+max_num_batched_tokens=4096
+max_num_seqs=32
+input_min=512
+input_max=1024
+output_max=2048
 
+export VLLM_CONTIGUOUS_PA=true
 # ***************************************  bucketing ******************************************* #
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX VLLM_PROMPT_BS_BUCKET_LIMIT
 unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX VLLM_PROMPT_SEQ_BUCKET_LIMIT
@@ -33,6 +34,7 @@ unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLO
 # Set limit to 0 for getting best perf
 # Set limit to 0.1 to balance perf and warmup time
 export BUCKET_PADDING_RATIO=0.1
+unset BUCKET_PADDING_RATIO
 
 set_bucketing
 
@@ -44,8 +46,11 @@ export VLLM_PROMPT_SEQ_BUCKET_STEP=128
 export VLLM_PROMPT_SEQ_BUCKET_MAX=1
 
 #export VLLM_DECODE_BLOCK_BUCKET_MIN=2048
-#export VLLM_DECODE_BS_BUCKET_STEP=2
+export VLLM_DECODE_BS_BUCKET_STEP=32
 #export VLLM_DECODE_BLOCK_BUCKET_STEP=2
+
+export VLLM_DECODE_BS_BUCKET_LIMIT=0
+export VLLM_DECODE_BLOCK_BUCKET_LIMIT=0
 
 echo " environments are reseted "
 
@@ -65,7 +70,7 @@ export VLLM_DP_MASTER_PORT=25940
 export VLLM_EP_SIZE=16
 
 # warmup settings
-#export VLLM_SKIP_WARMUP=True
+export VLLM_SKIP_WARMUP=false
 if [ "$INC_FP8" -eq 1 ]; then
   export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_fp8_inc_d_cache,false,262144,false
 else
